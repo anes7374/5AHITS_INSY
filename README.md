@@ -4,6 +4,9 @@ Abgabe zu **4AHITS_NN_from_scratch.pdf** (INSY, 4AHITS). Ein Feedforward-Netz mi
 Backpropagation, selbst implementiert in Python, exportiert in drei Formate, nachgerechnet in
 C und TensorFlow, und als interaktive Visualisierung im Browser.
 
+**Online ansehen (GitHub Pages):**
+[Startseite](https://anes7374.github.io/5AHITS_INSY/) · [Interaktive Visualisierung](https://anes7374.github.io/5AHITS_INSY/visualisierung/) · [Dokumentation](https://anes7374.github.io/5AHITS_INSY/dokumentation/dokumentation.html) · [Dokumentation als PDF](https://anes7374.github.io/5AHITS_INSY/dokumentation/dokumentation.pdf)
+
 | Dokument | Inhalt |
 |---|---|
 | [Implementation.md](Implementation.md) | Plan mit allen Phasen und ihrem Stand |
@@ -133,6 +136,7 @@ experimente/            Phase 8: parallel.py (viele Netze gleichzeitig), Studien
 ergebnisse/             JSON und PNG aus TensorFlow-Vergleich und Experimenten
 tests/                  pytest: Kern, Persistenz, Trainer-Optionen, C, Softmax
 dokumentation/          Quarto-Dokumentation: dokumentation.qmd -> .html und .pdf, Screenshots, Abbildungen
+index.html, .nojekyll   Startseite für GitHub Pages (verlinkt Visualisierung und Dokumentation)
 archiv/                 Ausgangsstand, unverändert
 ```
 

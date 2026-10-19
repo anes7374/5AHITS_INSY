@@ -673,6 +673,26 @@ und `models/` — die Lehrkraft soll Ergebnisse ansehen können, ohne etwas zu i
 93 Dateien (Treffer nur in eingebettetem Bibliotheks-Code). Sichtbar bleiben Name und Schul-Adresse
 in den Commit-Metadaten (Git-Konfiguration des Users). `.gitattributes`: Text mit LF, Bilder/PDF binär.
 
+### E-39: Keine Claude-Attribution in Commits
+
+**Entscheidung (User):** Commits ohne `Co-Authored-By: Claude`-Zeile, damit Claude auf GitHub nicht
+als Contributor erscheint. Die beiden ersten Commits wurden dafür neu geschrieben (nur die Nachricht,
+Dateibaum identisch geprüft) und mit `--force-with-lease` hochgeladen. Die KI-Unterstützung bleibt
+im Projekt dokumentiert (dieses Protokoll, `Prompts.md`, Abschnitt "Arbeitsweise" der Doku).
+
+### E-40: GitHub Pages aus dem main-Branch, mit Startseite
+
+**Entscheidung:** Pages veröffentlicht den Ordner `/` des Branches `main`. Ein Repo hat genau eine
+Pages-Seite; darauf liegen die Visualisierung (`/visualisierung/`) und die Dokumentation
+(`/dokumentation/dokumentation.html`), dazu eine kleine Startseite `index.html`, die beide verlinkt.
+`.nojekyll`, damit GitHub die Dateien unverändert ausliefert.
+
+**Begründung:** Beide Seiten sind schon fertige, eigenständige HTML-Dateien im Repo — kein
+Build-Schritt nötig, kein zweites Repo, kein Actions-Workflow. Adresse: https://anes7374.github.io/5AHITS_INSY/
+
+**Verworfen:** zwei getrennte Repos für zwei Pages-Seiten (doppelte Pflege); `gh-pages`-Branch
+(Dateien lägen doppelt).
+
 ---
 
 ## Offene Punkte / noch zu entscheiden

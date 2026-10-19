@@ -219,3 +219,21 @@ Darstellungsfehler (Formeln, Anführungszeichen, Bildpfade) behoben. E-37.
 **Ergebnis:** `.gitignore` und `.gitattributes`, `git init -b main`, erster Commit mit 93 Dateien (15 MB),
 vorher auf private Daten geprüft. E-38.
 
+---
+
+## P-16 · 19.10.2026 · Claude aus den Contributors entfernen
+
+**Prompt (gekürzt):** Kann man "Claude" aus den Contributors wegmachen?
+
+**Ergebnis:** Co-Author-Zeile aus beiden Commits entfernt, Dateibaum unverändert, mit
+`--force-with-lease` neu hochgeladen. Künftige Commits ohne Claude-Zeile. E-39.
+
+---
+
+## P-17 · 19.10.2026 · GitHub Pages für Visualisierung und Dokumentation
+
+**Prompt (gekürzt):** Zwei GitHub Pages einrichten: Visualisierung und Quarto-Dokumentation.
+
+**Ergebnis:** Eine Pages-Seite mit Startseite `index.html` und zwei Unterseiten, `.nojekyll`, Links in
+der README. Adresse: https://anes7374.github.io/5AHITS_INSY/ E-40.
+

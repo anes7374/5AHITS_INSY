@@ -1,0 +1,71 @@
+<!doctype html>
+<!--
+  index.html -- Startseite für GitHub Pages (https://anes7374.github.io/5AHITS_INSY/).
+  Verlinkt die interaktive Visualisierung und die Quarto-Dokumentation. Keine Skripte, keine
+  externen Dateien außer Schriften; Farben wie in visualisierung/vorlage.html.
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neuronales Netz from scratch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+:root {
+  --paper: #f5f6f8; --panel: #ffffff; --ink: #141b22; --ink-2: #47535f; --ink-3: #75818d;
+  --rule: #dfe4e9; --led: #e2441c; --display: #111417;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #0e1216; --panel: #151b21; --ink: #e5eaef; --ink-2: #a3afba; --ink-3: #7a8692;
+          --rule: #2a343e; --led: #ff6838; --display: #090b0d; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 "Instrument Sans", "Segoe UI", system-ui, sans-serif; }
+main { max-width: 880px; margin: 0 auto; padding: clamp(32px, 7vw, 80px) 16px 48px; }
+.mark { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 9px; background: var(--display);
+        color: var(--led); font: 700 1.5rem/1 "Chakra Petch", sans-serif; text-shadow: 0 0 10px color-mix(in srgb, var(--led) 70%, transparent); }
+h1 { font: 700 clamp(1.9rem, 5vw, 2.8rem)/1.1 "Chakra Petch", sans-serif; margin: 18px 0 10px; }
+.lede { color: var(--ink-2); margin: 0 0 32px; max-width: 62ch; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 640px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+a.card { display: grid; gap: 6px; padding: 22px; border-radius: 12px; background: var(--panel); border: 1px solid var(--rule);
+         color: inherit; text-decoration: none; transition: border-color .15s, transform .15s; }
+a.card:hover { border-color: var(--led); transform: translateY(-2px); }
+a.card h2 { margin: 0; font: 600 1.25rem/1.2 "Chakra Petch", sans-serif; }
+a.card p { margin: 0; color: var(--ink-2); font-size: .95rem; }
+a.card span { color: var(--led); font-weight: 600; font-size: .9rem; margin-top: 6px; }
+.more { margin-top: 28px; color: var(--ink-3); font-size: .9rem; }
+.more a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <span class="mark" aria-hidden="true">8</span>
+  <h1>Neuronales Netz from scratch</h1>
+  <p class="lede">Ein selbst implementiertes Feedforward-Netz mit Backpropagation: in Python trainiert,
+    nach JSON, TXT und C exportiert, mit TensorFlow verglichen und hier im Browser nachgerechnet.
+    Anes Sejdic · INSY</p>
+
+  <div class="cards">
+    <a class="card" href="visualisierung/">
+      <h2>Interaktive Visualisierung</h2>
+      <p>7-Segment-Decoder ausprobieren, Ziffern zeichnen, den Rechenweg Schritt für Schritt verfolgen
+        und ein Netz live trainieren.</p>
+      <span>Öffnen →</span>
+    </a>
+    <a class="card" href="dokumentation/dokumentation.html">
+      <h2>Dokumentation</h2>
+      <p>Theorie mit allen Formeln, Implementierung, Ergebnisse, Tests und Screenshots
+        (Quarto).</p>
+      <span>Lesen →</span>
+    </a>
+  </div>
+
+  <p class="more">Auch als <a href="dokumentation/dokumentation.pdf">PDF</a> ·
+    Quellcode auf <a href="https://github.com/anes7374/5AHITS_INSY">GitHub</a></p>
+</main>
+</body>
+</html>
