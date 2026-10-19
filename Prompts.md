@@ -203,3 +203,19 @@ Code-Auszügen, Exportformaten, Ergebnistabellen, 12 Screenshots und 9 Diagramme
 Bilder per `screenshots.py` und `abbildungen.py` reproduzierbar. Alle Seiten gerendert geprüft,
 Darstellungsfehler (Formeln, Anführungszeichen, Bildpfade) behoben. E-37.
 
+---
+
+## P-15 · 19.10.2026 · Git-Repo für die Abgabe
+
+**Prompt (gekürzt):** Alles in ein Git-Repo, das beim Lehrer abgegeben wird.
+
+**Rückfragen von Claude und Antworten:**
+| Frage | Antwort |
+|---|---|
+| Plattform? | GitHub |
+| Sichtbarkeit? | öffentlich |
+| Angabe-PDF ins Repo? | nein |
+
+**Ergebnis:** `.gitignore` und `.gitattributes`, `git init -b main`, erster Commit mit 93 Dateien (15 MB),
+vorher auf private Daten geprüft. E-38.
+

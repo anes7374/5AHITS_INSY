@@ -656,9 +656,26 @@ doppelter Format-Link (abgeschaltet, Hinweis auf das PDF nur in der HTML-Fassung
 **Verworfen:** LaTeX/TinyTeX (großer Download), Quarto-Buchprojekt mit mehreren Dateien (für
 26 Seiten unnötig), dunkle Screenshots (schlecht zu drucken).
 
+## 2026-10-19 — Git-Repo für die Abgabe
+
+### E-38: Öffentliches GitHub-Repo, ohne Angabe, venv und Build-Ergebnisse
+
+**Entscheidung (User):** öffentliches Repo auf GitHub, Abgabe über den Link. Die Angabe
+`4AHITS_NN_from_scratch.pdf` (Unterlage der Lehrkraft) kommt nicht hinein.
+
+**Nicht im Repo (`.gitignore`):** `.venv-tf/` (1,6 GB, nach README neu anlegbar), `*.exe`/`*.o`
+(mit `mingw32-make` neu bauen), `__pycache__`, `.pytest_cache`, `dokumentation/.quarto/`, die Angabe.
+MNIST liegt ohnehin außerhalb des Projekts (Keras-Cache, Download-Anleitung im README).
+**Im Repo:** auch die erzeugten Dateien `visualisierung/index.html`, `dokumentation/*.html|.pdf`
+und `models/` — die Lehrkraft soll Ergebnisse ansehen können, ohne etwas zu installieren.
+
+**Vor dem Veröffentlichen geprüft:** keine Benutzerpfade, E-Mail-Adressen oder Zugangsdaten in den
+93 Dateien (Treffer nur in eingebettetem Bibliotheks-Code). Sichtbar bleiben Name und Schul-Adresse
+in den Commit-Metadaten (Git-Konfiguration des Users). `.gitattributes`: Text mit LF, Bilder/PDF binär.
+
 ---
 
 ## Offene Punkte / noch zu entscheiden
 
 - ~~Hidden-Layer-Größe im TF-Vergleich~~ → erledigt, siehe E-20.
-- Ob das Projekt unter Versionskontrolle gestellt wird (`git init`) — aktuell kein Repo.
+- ~~Versionskontrolle~~ → erledigt, siehe E-38.
