@@ -1,0 +1,99 @@
+{
+ "seeds": 100,
+ "learning_rate": 0.1,
+ "ergebnisse": [
+  {
+   "hidden": 2,
+   "init": "klein",
+   "richtig_20k": 86,
+   "sauber_20k": 58,
+   "median_epoche_j001": 15919.0,
+   "richtig_80k": 93,
+   "haengt_fest": 7,
+   "kosten_haengend": [
+    0.063,
+    0.063,
+    0.063,
+    0.0631,
+    0.0839,
+    0.0839,
+    0.084
+   ]
+  },
+  {
+   "hidden": 2,
+   "init": "xavier",
+   "richtig_20k": 75,
+   "sauber_20k": 74,
+   "median_epoche_j001": 5790.0,
+   "richtig_80k": 76,
+   "haengt_fest": 24,
+   "kosten_haengend": [
+    0.063,
+    0.063,
+    0.063,
+    0.063,
+    0.063,
+    0.063,
+    0.063,
+    0.063,
+    0.063,
+    0.0634,
+    0.0634,
+    0.0634,
+    0.0634,
+    0.0634,
+    0.0634,
+    0.0634,
+    0.0638,
+    0.0638,
+    0.0638,
+    0.0638,
+    0.0638,
+    0.0638,
+    0.0638,
+    0.0843
+   ]
+  },
+  {
+   "hidden": 3,
+   "init": "klein",
+   "richtig_20k": 96,
+   "sauber_20k": 83,
+   "median_epoche_j001": 16220.0,
+   "richtig_80k": 100,
+   "haengt_fest": 0,
+   "kosten_haengend": []
+  },
+  {
+   "hidden": 3,
+   "init": "xavier",
+   "richtig_20k": 99,
+   "sauber_20k": 99,
+   "median_epoche_j001": 4960.0,
+   "richtig_80k": 100,
+   "haengt_fest": 0,
+   "kosten_haengend": []
+  },
+  {
+   "hidden": 4,
+   "init": "klein",
+   "richtig_20k": 99,
+   "sauber_20k": 91,
+   "median_epoche_j001": 15800.5,
+   "richtig_80k": 100,
+   "haengt_fest": 0,
+   "kosten_haengend": []
+  },
+  {
+   "hidden": 4,
+   "init": "xavier",
+   "richtig_20k": 100,
+   "sauber_20k": 100,
+   "median_epoche_j001": 4800.5,
+   "richtig_80k": 100,
+   "haengt_fest": 0,
+   "kosten_haengend": []
+  }
+ ]
+}

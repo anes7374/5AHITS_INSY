@@ -1,0 +1,11 @@
+Gleichwertigkeit mit nn/: max. Abweichung 2.2e-16
+
+Hidden    Init | richtig@20k sauber@20k Median J<0.01 | richtig@80k hängt fest   Zeit
+     2   klein |          86         58         15919 |          93          7   23 s
+     2  xavier |          75         74          5790 |          76         24   21 s
+     3   klein |          96         83         16220 |         100          0   24 s
+     3  xavier |          99         99          4960 |         100          0   23 s
+     4   klein |          99         91         15800 |         100          0   23 s
+     4  xavier |         100        100          4800 |         100          0   25 s
+
+Gespeichert: ergebnisse/seed_studie.json, ergebnisse/seed_studie.png

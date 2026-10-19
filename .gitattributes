@@ -1,0 +1,7 @@
+# Textdateien im Repo mit LF speichern, Git passt die Zeilenenden beim Auschecken an
+* text=auto
+
+# Binärdateien nie verändern
+*.png binary
+*.pdf binary
+*.npz binary

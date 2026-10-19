@@ -1,0 +1,31 @@
+# XOR-Netz (Part 2, Step 1)
+# Struktur: 2 -> 2 -> 1   (Eingabe -> ... -> Ausgabe)
+# Aktivierungen: sigmoid, sigmoid
+#
+# Aufbau dieser Datei -- Zeilen mit '#' sind Kommentare und werden beim Einlesen
+# uebersprungen, alle anderen Zeilen enthalten nur Zahlen bzw. den Aktivierungsnamen:
+#   1. Anzahl der Schichten (ohne Eingabeschicht)
+#   2. pro Schicht eine Kopfzeile:  <Neuronen> <Eingaenge je Neuron> <Aktivierung>
+#   3. danach pro Neuron eine Zeile: <Bias> <Gewicht 0> <Gewicht 1> ...
+#      Gewicht j gehoert zu Eingang j, also zu Neuron j der Vorschicht.
+#
+# Rechnung je Neuron:  z = Bias + Summe(Gewicht_j * Eingang_j),  Ausgabe = f(z)
+# Die Zahlen sind exakt (kuerzeste Darstellung, die beim Einlesen wieder genau
+# denselben double-Wert ergibt).
+
+# Anzahl der Schichten
+2
+
+# ---- Schicht 0 (Hidden): 2 Neuronen, je 2 Eingaenge, sigmoid
+2 2 sigmoid
+#                       Bias               Gewicht 0               Gewicht 1
+# Neuron 0
+            6.06586432921751      -4.099769290988828      -4.109435034086112
+# Neuron 1
+          2.2666433275357676      -5.860881390278769      -5.918335628062162
+
+# ---- Schicht 1 (Ausgabe): 1 Neuronen, je 2 Eingaenge, sigmoid
+1 2 sigmoid
+#                       Bias               Gewicht 0               Gewicht 1
+# Neuron 0
+         -3.7342474438072357       8.083574533730397      -8.353200840676713

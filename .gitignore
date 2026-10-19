@@ -1,0 +1,19 @@
+# Python-Zwischendateien
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# venv für TensorFlow (Part 3), ~1,6 GB -- wird nach README neu angelegt:
+#   py -3.12 -m venv .venv-tf  &&  .venv-tf\Scripts\python -m pip install tensorflow
+.venv-tf/
+
+# C-Programme aus Part 4/5 -- mit mingw32-make neu bauen
+*.exe
+*.o
+
+# Quarto-Zwischendateien (die fertige dokumentation.html/.pdf sind im Repo)
+dokumentation/.quarto/
+dokumentation/*_files/
+
+# Angabe der Lehrkraft -- wird nicht veröffentlicht
+4AHITS_NN_from_scratch.pdf

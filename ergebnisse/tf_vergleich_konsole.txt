@@ -1,0 +1,78 @@
+TensorFlow 2.21.0, Keras 3.15.1, numpy 2.5.4
+
+==============================================================================
+XOR: 2 -> 2 -> 1, 20000 Epochen, alpha 0.1
+==============================================================================
+  eigen         fertig in    2.6 s
+  TF identisch  fertig in   11.5 s
+  TF standard   fertig in   11.5 s
+
+  Lauf                  MSE     Bits   Samples    Dauer  Epoche J<0.01
+  eigen            0.000961    4/4       4/4       2.6s          12494
+  TF identisch     0.000961    4/4       4/4      11.5s          12494
+  TF standard      0.083924    3/4       3/4      11.5s            nie
+
+  Vorhersagen je Eingabe (bei mehreren Ausgängen: der erste Ausgang)
+  Eingabe           Soll       eigen   TF identisch   TF Standard
+  [0, 0]               0    0.037759       0.037759      0.331783
+  [0, 1]               1    0.958389       0.958389      0.972876
+  [1, 0]               1    0.958241       0.958241      0.327846
+  [1, 1]               0    0.052827       0.052827      0.329825
+
+  max. |eigen - TF identisch| über alle Ausgänge: 1.39e-16
+
+==============================================================================
+7-Segment (Größe aus Part 2): 4 -> 16 -> 7, 20000 Epochen, alpha 0.1
+==============================================================================
+  eigen         fertig in   33.2 s
+  TF identisch  fertig in   17.9 s
+  TF standard   fertig in   19.0 s
+
+  Lauf                  MSE     Bits   Samples    Dauer  Epoche J<0.01
+  eigen            0.000437   70/70     10/10     33.2s           2626
+  TF identisch     0.000437   70/70     10/10     17.9s           2626
+  TF standard      0.002469   70/70     10/10     19.0s           9166
+
+  Vorhersagen je Eingabe (bei mehreren Ausgängen: der erste Ausgang)
+  Eingabe           Soll       eigen   TF identisch   TF Standard
+  [0, 0, 0, 0]         1    0.985245       0.985245      0.963987
+  [0, 0, 0, 1]         0    0.020008       0.020008      0.048923
+  [0, 0, 1, 0]         1    0.999996       0.999996      0.999518
+  [0, 0, 1, 1]         1    0.999992       0.999992      0.999516
+  [0, 1, 0, 0]         0    0.019671       0.019671      0.044932
+  [0, 1, 0, 1]         1    0.982397       0.982397      0.958301
+  [0, 1, 1, 0]         1    0.999998       0.999998      0.999573
+  [0, 1, 1, 1]         1    0.985715       0.985715      0.965918
+  [1, 0, 0, 0]         1    0.999230       0.999230      0.998914
+  [1, 0, 0, 1]         1    0.992726       0.992726      0.987027
+
+  max. |eigen - TF identisch| über alle Ausgänge: 1.11e-16
+
+==============================================================================
+7-Segment (Größe aus Part 3): 4 -> 10 -> 7, 20000 Epochen, alpha 0.1
+==============================================================================
+  eigen         fertig in   26.2 s
+  TF identisch  fertig in   16.7 s
+  TF standard   fertig in   18.8 s
+
+  Lauf                  MSE     Bits   Samples    Dauer  Epoche J<0.01
+  eigen            0.000611   70/70     10/10     26.2s           2991
+  TF identisch     0.000611   70/70     10/10     16.7s           2991
+  TF standard      0.002673   70/70     10/10     18.8s           9243
+
+  Vorhersagen je Eingabe (bei mehreren Ausgängen: der erste Ausgang)
+  Eingabe           Soll       eigen   TF identisch   TF Standard
+  [0, 0, 0, 0]         1    0.981575       0.981575      0.956559
+  [0, 0, 0, 1]         0    0.029632       0.029632      0.050773
+  [0, 0, 1, 0]         1    1.000000       1.000000      0.999940
+  [0, 0, 1, 1]         1    0.999997       0.999997      0.999358
+  [0, 1, 0, 0]         0    0.014527       0.014527      0.046866
+  [0, 1, 0, 1]         1    0.989539       0.989539      0.959477
+  [0, 1, 1, 0]         1    0.999997       0.999997      0.999874
+  [0, 1, 1, 1]         1    0.973682       0.973682      0.953446
+  [1, 0, 0, 0]         1    0.999997       0.999997      0.997370
+  [1, 0, 0, 1]         1    0.989712       0.989712      0.989627
+
+  max. |eigen - TF identisch| über alle Ausgänge: 2.22e-16
+
+Gespeichert: ergebnisse\tf_vergleich.json

@@ -1,0 +1,29 @@
+[
+ {
+  "netz": "XOR 2-2-1",
+  "epochs": 20000,
+  "objektorientiert_s": 1.5601585999829695,
+  "vektorisiert_s": 2.4007376999943517,
+  "faktor": 0.6498663306643787,
+  "abweichung_vorhersage": 1.3183898417423734e-16,
+  "abweichung_kosten": 5.620504062164855e-16
+ },
+ {
+  "netz": "7-Segment 4-16-7",
+  "epochs": 20000,
+  "objektorientiert_s": 28.046448799956124,
+  "vektorisiert_s": 7.438550500024576,
+  "faktor": 3.770418551284079,
+  "abweichung_vorhersage": 2.220446049250313e-16,
+  "abweichung_kosten": 2.220446049250313e-16
+ },
+ {
+  "netz": "7-Segment 4-64-7",
+  "epochs": 5000,
+  "objektorientiert_s": 19.006308200012427,
+  "vektorisiert_s": 1.9494474999955855,
+  "faktor": 9.749587100989109,
+  "abweichung_vorhersage": 2.220446049250313e-16,
+  "abweichung_kosten": 2.220446049250313e-16
+ }
+]

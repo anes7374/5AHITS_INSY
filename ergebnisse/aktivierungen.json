@@ -1,0 +1,114 @@
+{
+ "epochs": 20000,
+ "learning_rate": 0.1,
+ "ergebnisse": [
+  {
+   "aufgabe": "XOR 2-2-1",
+   "aktivierung": "sigmoid",
+   "init": "klein",
+   "laeufe": 100,
+   "richtig": 86,
+   "median_epoche_j001": 15919.0,
+   "median_kosten_ende": 0.0021439086604940617
+  },
+  {
+   "aufgabe": "XOR 2-2-1",
+   "aktivierung": "sigmoid",
+   "init": "xavier",
+   "laeufe": 100,
+   "richtig": 75,
+   "median_epoche_j001": 5790.0,
+   "median_kosten_ende": 0.0005588689797469868
+  },
+  {
+   "aufgabe": "XOR 2-2-1",
+   "aktivierung": "tanh",
+   "init": "klein",
+   "laeufe": 100,
+   "richtig": 9,
+   "median_epoche_j001": 4194.0,
+   "median_kosten_ende": 0.12578385411536908
+  },
+  {
+   "aufgabe": "XOR 2-2-1",
+   "aktivierung": "tanh",
+   "init": "xavier",
+   "laeufe": 100,
+   "richtig": 49,
+   "median_epoche_j001": 1045.0,
+   "median_kosten_ende": 0.06380139167724166
+  },
+  {
+   "aufgabe": "XOR 2-2-1",
+   "aktivierung": "relu",
+   "init": "klein",
+   "laeufe": 100,
+   "richtig": 18,
+   "median_epoche_j001": 1014.0,
+   "median_kosten_ende": 0.08374903579572843
+  },
+  {
+   "aufgabe": "XOR 2-2-1",
+   "aktivierung": "relu",
+   "init": "xavier",
+   "laeufe": 100,
+   "richtig": 19,
+   "median_epoche_j001": 597.0,
+   "median_kosten_ende": 0.08374910891041971
+  },
+  {
+   "aufgabe": "7-Segment 4-16-7",
+   "aktivierung": "sigmoid",
+   "init": "klein",
+   "laeufe": 50,
+   "richtig": 50,
+   "median_epoche_j001": 2679.5,
+   "median_kosten_ende": 0.00045683420989793083
+  },
+  {
+   "aufgabe": "7-Segment 4-16-7",
+   "aktivierung": "sigmoid",
+   "init": "xavier",
+   "laeufe": 50,
+   "richtig": 50,
+   "median_epoche_j001": 2465.5,
+   "median_kosten_ende": 0.00045595063649419486
+  },
+  {
+   "aufgabe": "7-Segment 4-16-7",
+   "aktivierung": "tanh",
+   "init": "klein",
+   "laeufe": 50,
+   "richtig": 50,
+   "median_epoche_j001": 649.5,
+   "median_kosten_ende": 0.00010403647490187686
+  },
+  {
+   "aufgabe": "7-Segment 4-16-7",
+   "aktivierung": "tanh",
+   "init": "xavier",
+   "laeufe": 50,
+   "richtig": 50,
+   "median_epoche_j001": 577.5,
+   "median_kosten_ende": 0.00010155158083093943
+  },
+  {
+   "aufgabe": "7-Segment 4-16-7",
+   "aktivierung": "relu",
+   "init": "klein",
+   "laeufe": 50,
+   "richtig": 48,
+   "median_epoche_j001": 474.0,
+   "median_kosten_ende": 4.306408350587301e-05
+  },
+  {
+   "aufgabe": "7-Segment 4-16-7",
+   "aktivierung": "relu",
+   "init": "xavier",
+   "laeufe": 50,
+   "richtig": 49,
+   "median_epoche_j001": 413.0,
+   "median_kosten_ende": 4.321931353984832e-05
+  }
+ ]
+}

@@ -1,0 +1,2524 @@
+<!doctype html>
+<!--
+  vorlage.html -- Vorlage der interaktiven Visualisierung (Phase 7, Ersatz für Part 6 / ESP32).
+
+  NICHT direkt öffnen: Diese Datei enthält noch keine Netzdaten. Der fertige Export entsteht mit
+      python visualisierung/export_daten.py      ->  visualisierung/index.html
+  Das Skript ersetzt den Platzhalter in der Zeile  const NETZDATEN = ...  durch die Gewichte aus
+  models/7seg.json und models/xor.json sowie Referenzwerte aus Python, C und TensorFlow.
+
+  Aufbau dieser Datei:
+    <style>   Design-Tokens (Farben/Schriften, hell + dunkel), danach Layout und Komponenten
+    <body>    Kopfzeile mit fünf Bereichen (.group: Decoder, Zeichnen, So rechnet es, Training,
+              Ergebnisse); jeder Bereich enthält ein oder mehrere Kapitel (<section>), von denen
+              immer genau eines sichtbar ist (goTo/setupNav). Inhalte füllt das JavaScript.
+    <script>  1. Mathematik (forward, backprop -- dieselben Formeln wie nn/*.py)
+              2. Bausteine (Netzgraph, 7-Segment-Anzeige, Heatmap, Diagramme)
+              3. die einzelnen Kapitel
+  Kein Framework, keine externen Skripte: die Seite läuft offline per Doppelklick.
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neuronaler 7-Segment-Decoder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: Labor-Werkbank -- oben Eingabe | Netzgraph | Anzeige als Arbeitsfläche,
+   darunter die Kapitel wie ein Messprotokoll. Die LED-Anzeige ist das eine kräftige Element:
+   Neuronen "leuchten" in derselben LED-Farbe wie die Segmente (Aktivierung 0..1).
+   Vorzeichenbehaftete Größen (Gewichte, z, Gradienten) nutzen ein Teal/Magenta-Paar. */
+:root {
+  --paper: #f5f6f8;
+  --panel: #ffffff;
+  --sunk: #e8ecef;
+  --ink: #141b22;
+  --ink-2: #47535f;
+  --ink-3: #75818d;
+  --rule: #dfe4e9;
+  --led: #e2441c;
+  --led-ink: #b8330f;
+  --pos: #11806a;
+  --neg: #b4307a;
+  --ok: #1d7f45;
+  --bad: #c0262d;
+  --warn: #9a6a00;
+  --display: #111417;
+  --seg-off: #23282d;
+  --display-ink: #8a949e;
+  --focus: #2563eb;
+
+  --f-display: "Chakra Petch", "Bahnschrift", "DIN Alternate", "Arial Narrow", sans-serif;
+  --f-body: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --radius: 10px;
+  --gutter: clamp(16px, 3vw, 40px);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1216; --panel: #151b21; --sunk: #1c242c; --ink: #e5eaef; --ink-2: #a3afba;
+    --ink-3: #7a8692; --rule: #2a343e; --led: #ff6838; --led-ink: #ff8a62; --pos: #3cc49d;
+    --neg: #ef5fa9; --ok: #4cc27c; --bad: #ff6b6b; --warn: #e2b23c; --display: #090b0d;
+    --seg-off: #1d2227; --display-ink: #7d8790; --focus: #6ea1ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e1216; --panel: #151b21; --sunk: #1c242c; --ink: #e5eaef; --ink-2: #a3afba;
+  --ink-3: #7a8692; --rule: #2a343e; --led: #ff6838; --led-ink: #ff8a62; --pos: #3cc49d;
+  --neg: #ef5fa9; --ok: #4cc27c; --bad: #ff6b6b; --warn: #e2b23c; --display: #090b0d;
+  --seg-off: #1d2227; --display-ink: #7d8790; --focus: #6ea1ff;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 64px; }   /* kein weiches Scrollen: Kapitelwechsel springen sofort nach oben */
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; animation: none !important; } }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.55 var(--f-body);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1320px; margin: 0 auto; padding-inline: var(--gutter); }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 4.6vw, 3.4rem); letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.45rem, 2.6vw, 2rem); }
+h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: 0.01em; }
+p { margin: 0; max-width: 68ch; }
+a { color: inherit; }
+code, .mono { font-family: var(--f-mono); font-size: 0.86em; }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-2); }
+.small { font-size: 0.86rem; }
+.eyebrow {
+  font: 600 0.72rem/1 var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3);
+}
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+button, select, input { font: inherit; color: inherit; }
+
+/* ---------- Kopfzeile mit den fünf Bereichen ---------- */
+.topbar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in srgb, var(--paper) 90%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-in { display: flex; align-items: center; gap: 16px; min-height: 60px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font: 600 1rem/1.1 var(--f-display); white-space: nowrap; flex: none; }
+.brand-mark {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 7px;
+  background: var(--display); color: var(--led); font: 700 1.05rem/1 var(--f-display);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--led) 70%, transparent);
+}
+.brand-sub { color: var(--ink-3); font-weight: 500; }
+.tabs { display: flex; gap: 2px; margin-inline: auto; overflow-x: auto; scrollbar-width: none; }
+.tabs button {
+  border: 0; background: none; padding: 9px 14px; border-radius: 7px; cursor: pointer; white-space: nowrap;
+  font: 500 0.92rem/1 var(--f-body); color: var(--ink-2);
+}
+.tabs button:hover { background: var(--sunk); color: var(--ink); }
+.tabs button[aria-current="page"] { background: var(--ink); color: var(--paper); }
+.theme-btn { flex: none; border: 1px solid var(--rule); background: var(--panel); border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; cursor: pointer; color: var(--ink-2); }
+@media (max-width: 900px) {
+  .topbar-in { flex-wrap: wrap; gap: 6px 12px; padding-block: 8px; min-height: 0; }
+  .brand-sub { display: none; }
+  .theme-btn { margin-left: auto; }
+  .tabs { order: 3; width: 100%; margin: 0; }
+}
+
+/* ---------- Zweite Leiste: Kapitel eines Bereichs (+ Eingabe-Leiste bei "So rechnet es") ---------- */
+.group-head { background: var(--panel); border-bottom: 1px solid var(--rule); }
+.group-head .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; padding-block: 10px; }
+.subtabs { order: -1; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+.subtabs button {
+  border: 0; background: none; padding: 7px 12px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  font: 500 0.86rem/1 var(--f-body); color: var(--ink-2);
+}
+.subtabs button:hover { color: var(--ink); background: var(--sunk); }
+.subtabs button[aria-current="page"] { background: color-mix(in srgb, var(--led) 14%, transparent); color: var(--led-ink); }
+.inbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.inbar-label { font: 600 0.7rem/1 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.inbar-pad { display: flex; gap: 3px; flex-wrap: wrap; }
+.inbar-pad button {
+  width: 28px; height: 28px; padding: 0; border: 1px solid var(--rule); background: var(--panel); border-radius: 5px;
+  font: 600 0.85rem/1 var(--f-display); cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.inbar-pad button:hover { border-color: var(--ink-3); }
+.inbar-pad button.untrained { border-style: dashed; color: var(--ink-3); }
+.inbar-pad button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.inbar-out { font: 500 0.8rem/1.2 var(--f-mono); color: var(--ink-2); }
+
+/* ---------- Kennzahlen (Bereich Ergebnisse) ---------- */
+.facts { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 14px 24px; margin: 0 0 16px; }
+.facts div { display: grid; gap: 4px; }
+.facts dt { font: 500 0.68rem/1.2 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.facts dd { margin: 0; font: 600 1.3rem/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+@media (max-width: 860px) { .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* ---------- Kapitel ---------- */
+.group[hidden], section.chapter[hidden] { display: none; }
+section.chapter { padding-block: 28px 48px; }
+.chapter-head { display: grid; gap: 6px; margin-bottom: 20px; }
+.chapter-head h2 { font-size: clamp(1.35rem, 2.2vw, 1.75rem); }
+.chapter-head p { color: var(--ink-2); }
+.card {
+  background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius); padding: 20px; min-width: 0;
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+}
+.card > h3 { margin-bottom: 4px; }
+.card > .sub { color: var(--ink-3); font-size: 0.85rem; margin-bottom: 14px; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 980px) { .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* Aufklappbar: Zusatzregler, die man nicht ständig braucht */
+details.more { margin-top: 14px; border-top: 1px solid var(--rule); padding-top: 10px; }
+details.more > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px;
+  font-size: 0.85rem; color: var(--ink-2); user-select: none;
+}
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸"; font-size: 0.75rem; transition: transform 0.15s; }
+details.more[open] > summary::before { transform: rotate(90deg); }
+details.more > summary:hover { color: var(--ink); }
+details.more .bits { margin-top: 12px; }
+details.more.live-more { margin: 0 0 14px; border-top: 0; padding-top: 0; }
+.live-more .live-ctl { margin-top: 12px; }.scroll-x { overflow-x: auto; max-width: 100%; }
+.note {
+  border-left: 3px solid var(--rule); padding: 6px 0 6px 14px; color: var(--ink-2); font-size: 0.92rem;
+}
+.formula {
+  font-family: var(--f-mono); font-size: 0.88rem; background: var(--sunk); border-radius: 4px;
+  padding: 10px 12px; line-height: 1.7; overflow-x: auto; white-space: nowrap;
+}
+.formula .hl { color: var(--led-ink); font-weight: 500; }
+
+/* ---------- Werkbank (Decoder) ---------- */
+.bench {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr) 270px; gap: 16px; align-items: start;
+}
+@media (max-width: 1100px) {
+  .bench { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .bench .graph-card { grid-column: 1 / -1; order: -1; }
+}
+@media (max-width: 640px) { .bench { grid-template-columns: minmax(0, 1fr); } .bench .graph-card { order: 2; } }   /* Handy: Eingabe, Anzeige, dann Graph */
+
+.digit-pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.digit-pad button {
+  border: 1px solid var(--rule); background: var(--panel); border-radius: 4px; padding: 8px 0;
+  font: 600 1.1rem/1 var(--f-display); cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.digit-pad button:hover { border-color: var(--ink-3); }
+.digit-pad button.untrained { color: var(--ink-3); border-style: dashed; }
+.digit-pad button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.pad-legend { margin-top: 8px; font-size: 0.78rem; color: var(--ink-3); }
+
+.bits { display: grid; gap: 10px; margin-top: 18px; }
+.bit-row { display: grid; grid-template-columns: 70px 44px minmax(0, 1fr); align-items: center; gap: 8px; }
+.bit-row.fein { grid-template-columns: 70px minmax(0, 1fr); }
+.bit-row label { font: 500 0.8rem/1.2 var(--f-mono); color: var(--ink-2); }
+.bit-row label b { color: var(--ink); font-weight: 600; }
+.switch {
+  width: 44px; height: 24px; border-radius: 12px; border: 1px solid var(--rule); background: var(--sunk);
+  position: relative; cursor: pointer; padding: 0;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--ink-3); transition: transform 0.15s, background 0.15s;
+}
+.switch[aria-checked="true"] { background: color-mix(in srgb, var(--led) 22%, var(--panel)); border-color: var(--led); }
+.switch[aria-checked="true"]::after { transform: translateX(20px); background: var(--led); }
+input[type="range"] { width: 100%; accent-color: var(--led); min-width: 0; }
+.bit-row output { font: 500 0.8rem/1 var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.btn {
+  border: 1px solid var(--rule); background: var(--panel); border-radius: 4px; padding: 7px 11px;
+  font-size: 0.85rem; cursor: pointer; line-height: 1.2;
+}
+.btn:hover { border-color: var(--ink-3); }
+.btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.seg-ctl { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; flex-wrap: wrap; }
+.seg-ctl button { border: 0; background: var(--panel); padding: 6px 11px; font-size: 0.82rem; cursor: pointer; color: var(--ink-2); }
+.seg-ctl button + button { border-left: 1px solid var(--rule); }
+.seg-ctl button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.seg-ctl button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.graph-card { padding: 14px 14px 10px; }
+.graph-toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.graph-toolbar .label { font-size: 0.8rem; color: var(--ink-3); margin-right: 6px; }
+svg.net { width: 100%; height: auto; display: block; overflow: visible; user-select: none; }
+svg.net .edge { transition: opacity 0.15s; }
+svg.net.focus .edge:not(.hot) { opacity: 0.05; }
+svg.net.focus .node:not(.hot) { opacity: 0.35; }
+svg.net .node { cursor: pointer; }
+svg.net .node circle { stroke-width: 1.5; }
+svg.net .node.sel circle { stroke: var(--focus); stroke-width: 3; }
+svg.net .node text { font: 500 8.5px var(--f-mono); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+svg.net .lbl { font: 500 11px var(--f-mono); fill: var(--ink-2); dominant-baseline: central; }
+svg.net .col-title { font: 600 10px var(--f-mono); letter-spacing: 0.1em; fill: var(--ink-3); text-anchor: middle; text-transform: uppercase; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.78rem; color: var(--ink-3); margin-top: 6px; }
+.legend i { display: inline-block; width: 22px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.legend i.dot { width: 11px; height: 11px; border-radius: 50%; }
+
+.display-wrap { background: var(--display); border-radius: var(--radius); padding: 18px 18px 14px; display: grid; justify-items: center; gap: 10px; }
+.display-wrap svg { width: 132px; height: auto; }
+.display-caption { font: 500 0.72rem/1.3 var(--f-mono); color: var(--display-ink); letter-spacing: 0.08em; text-transform: uppercase; text-align: center; }
+.verdict { margin-top: 14px; display: grid; gap: 6px; }
+.verdict .big { font: 600 1.25rem/1.2 var(--f-display); }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font: 600 0.72rem/1.5 var(--f-mono); letter-spacing: 0.04em; }
+.pill.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.pill.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+.pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.pill.neutral { background: var(--sunk); color: var(--ink-2); }
+
+.bars { display: grid; gap: 5px; margin-top: 14px; }
+.bar-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) 50px; gap: 8px; align-items: center; font: 500 0.8rem/1 var(--f-mono); }
+.bar-track { position: relative; height: 12px; background: var(--sunk); border-radius: 2px; overflow: visible; }
+.bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--led); border-radius: 2px; }
+.bar-thresh { position: absolute; top: -3px; bottom: -3px; left: 50%; width: 1px; background: var(--ink-3); }
+.bar-target { position: absolute; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; border: 1.5px solid var(--ink); background: var(--panel); }
+.bar-row .v { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- Zeichnen (Phase 9) ---------- */
+.draw-bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) minmax(0, 0.75fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .draw-bench { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .draw-bench > :nth-child(2) { grid-column: 1 / -1; order: 1; } }
+@media (max-width: 640px) { .draw-bench { grid-template-columns: minmax(0, 1fr); } }
+.draw-pad { display: block; width: 100%; aspect-ratio: 1; border-radius: var(--radius); background: var(--display); touch-action: none; cursor: crosshair; }
+.draw-split { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+@media (max-width: 520px) { .draw-split { grid-template-columns: minmax(0, 1fr); } }
+.draw-split h3 { margin-bottom: 4px; }
+.draw-split .sub { color: var(--ink-3); font-size: 0.85rem; margin-bottom: 12px; }
+canvas.pix { display: block; width: 100%; max-width: 200px; aspect-ratio: 1; image-rendering: pixelated; border-radius: 3px; border: 1px solid var(--rule); }
+.feat-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.feat-grid canvas { display: block; width: 100%; aspect-ratio: 1; image-rendering: pixelated; border-radius: 2px; outline: 2px solid transparent; outline-offset: 1px; transition: opacity 0.12s; }
+.feat-grid canvas.top { outline-color: var(--led); }
+.guess { background: var(--display); border-radius: var(--radius); padding: 14px; display: grid; justify-items: center; gap: 2px; }
+.guess .digit { font: 600 5.2rem/1 var(--f-display); color: var(--led); text-shadow: 0 0 18px color-mix(in srgb, var(--led) 70%, transparent); font-variant-numeric: tabular-nums; }
+.guess .digit.leer { color: var(--seg-off); text-shadow: none; }
+.guess .p { font: 500 0.78rem/1.3 var(--f-mono); color: var(--display-ink); letter-spacing: 0.06em; text-transform: uppercase; }
+.bars.prob .bar-fill { background: var(--ink-3); }
+.bars.prob .bar-row { grid-template-columns: 16px minmax(0, 1fr) 60px; }   /* Platz für "100,0 %" */
+.bars.prob .bar-row.win .bar-fill { background: var(--led); }
+
+/* ---------- Rechenweg ---------- */
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; counter-reset: s; }
+.steps li { counter-increment: s; }
+.steps button {
+  border: 1px solid var(--rule); background: var(--panel); border-radius: 4px; padding: 7px 11px 7px 8px;
+  font: 500 0.82rem/1.2 var(--f-mono); cursor: pointer; display: flex; gap: 8px; align-items: center; color: var(--ink-2);
+}
+.steps button::before {
+  content: counter(s); display: grid; place-items: center; width: 20px; height: 20px; border-radius: 3px;
+  background: var(--sunk); font: 600 0.75rem/1 var(--f-display); color: var(--ink-2);
+}
+.steps button[aria-current="step"] { border-color: var(--ink); color: var(--ink); }
+.steps button[aria-current="step"]::before { background: var(--led); color: #fff; }
+.step-layout { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .step-layout { grid-template-columns: minmax(0, 1fr); } }
+.step-body { display: grid; gap: 14px; }
+.step-body h3 { font-size: 1.15rem; }
+
+table.mat { border-collapse: separate; border-spacing: 2px; font: 500 0.74rem/1 var(--f-mono); font-variant-numeric: tabular-nums; }
+table.mat td, table.mat th { padding: 5px 5px; text-align: right; border-radius: 2px; white-space: nowrap; }
+table.mat th { font-weight: 500; color: var(--ink-3); font-size: 0.68rem; }
+table.mat td.op { color: var(--ink-3); background: none; padding: 0 2px; text-align: center; }
+table.mat tr.sel td.cell { box-shadow: inset 0 0 0 1.5px var(--focus); }
+table.mat tr.row { cursor: pointer; }
+table.mat tr.xrow td { background: var(--sunk); }
+table.mat td.rowlbl { color: var(--ink-2); text-align: left; padding-right: 8px; }
+
+/* ---------- Neuron-Inspektor ---------- */
+.insp-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.insp-head select { border: 1px solid var(--rule); background: var(--panel); border-radius: 4px; padding: 6px 8px; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; font-size: 0.9rem; }
+.kv dt { color: var(--ink-3); font-family: var(--f-mono); font-size: 0.8rem; }
+.kv dd { margin: 0; font-family: var(--f-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart text { font: 500 10px var(--f-mono); fill: var(--ink-3); }
+svg.chart .grid line { stroke: var(--rule); stroke-width: 1; }
+svg.chart .axis { stroke: var(--ink-3); stroke-width: 1; }
+
+/* ---------- Heatmaps ---------- */
+svg.heat { display: block; overflow: visible; max-width: 100%; height: auto; }
+svg.heat text { font: 500 10px var(--f-mono); fill: var(--ink-3); dominant-baseline: central; }
+svg.heat .cell { cursor: pointer; }
+svg.heat .cell:hover { stroke: var(--ink); stroke-width: 1.5; }
+svg.heat .val { font-size: 8.5px; text-anchor: middle; pointer-events: none; }
+.scale-bar { display: flex; align-items: center; gap: 8px; font: 500 0.74rem/1 var(--f-mono); color: var(--ink-3); margin-top: 8px; }
+.scale-bar span.grad { height: 8px; flex: 0 1 180px; border-radius: 2px; }
+
+/* ---------- Ziffern-Übersicht ---------- */
+.digit-strip { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); gap: 6px; }
+.strip-card { margin-top: 16px; }
+@media (max-width: 1100px) { .digit-strip { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .digit-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.digit-tile {
+  background: var(--display); border-radius: 5px; padding: 10px 8px 8px; display: grid; justify-items: center; gap: 6px;
+  border: 2px solid transparent; cursor: pointer;
+}
+.digit-tile:hover { border-color: var(--ink-3); }
+.digit-tile.cur { border-color: var(--led); }
+.digit-tile svg { width: 100%; max-width: 54px; height: auto; }
+.digit-tile .cap { font: 500 0.68rem/1.2 var(--f-mono); color: var(--display-ink); text-align: center; }
+.digit-tile .cap b { color: #e9edf0; font-weight: 600; }
+.digit-tile.untrained { opacity: 0.85; border-style: dashed; border-color: #3a4148; }
+
+/* ---------- Live-Training ---------- */
+.live-ctl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+@media (max-width: 860px) { .live-ctl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.live-ctl label { display: grid; gap: 4px; font-size: 0.8rem; color: var(--ink-3); }
+.live-ctl select { border: 1px solid var(--rule); background: var(--panel); border-radius: 4px; padding: 6px 8px; }
+.stat-row { display: flex; flex-wrap: wrap; gap: 8px 26px; margin-bottom: 10px; }
+.stat-row div { display: grid; gap: 2px; }
+.stat-row dt { font: 500 0.68rem/1.2 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+.stat-row dd { margin: 0; font: 600 1.15rem/1.1 var(--f-display); font-variant-numeric: tabular-nums; }
+.live-digits { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 5px; background: var(--display); padding: 10px; border-radius: 5px; }
+.live-digits svg { width: 100%; height: auto; }
+@media (max-width: 560px) { .live-digits { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+
+/* ---------- XOR ---------- */
+.xor-planes { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .xor-planes { grid-template-columns: minmax(0, 1fr); } }
+.plane { position: relative; width: 100%; max-width: 100%; aspect-ratio: 1; border-radius: 4px; overflow: hidden; border: 1px solid var(--rule); touch-action: none; }
+.plane canvas { width: 100%; height: 100%; display: block; image-rendering: auto; }
+.plane svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.plane.main { cursor: crosshair; }
+.plane-cap { font: 500 0.75rem/1.3 var(--f-mono); color: var(--ink-3); margin-top: 6px; }
+.hid-planes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+/* ---------- Tabellen ---------- */
+table.data { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+table.data th, table.data td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+/* kein text-transform: uppercase -- es würde δ in Δ verwandeln */
+table.data th { font: 600 0.74rem/1.2 var(--f-mono); letter-spacing: 0.02em; color: var(--ink-3); }
+table.data td.r, table.data th.r { text-align: right; }
+table.data td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+
+footer { padding-block: 8px 40px; color: var(--ink-3); font-size: 0.85rem; }
+footer .wrap { display: grid; gap: 8px; border-top: 1px solid var(--rule); padding-top: 20px; }
+
+/* ---------- Tooltip ---------- */
+#tip {
+  position: fixed; z-index: 50; pointer-events: none; max-width: 300px;
+  background: var(--ink); color: var(--paper); border-radius: 4px; padding: 7px 10px;
+  font: 500 0.76rem/1.45 var(--f-mono); white-space: pre-line; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+}
+.empty-msg { padding: 18px; border: 1px dashed var(--rule); border-radius: var(--radius); color: var(--ink-2); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+
+<!-- Kopfzeile: fünf Bereiche als Tabs. Es ist immer genau EIN Kapitel (<section>) sichtbar;
+     Bereiche mit mehreren Kapiteln haben darunter eine zweite Tab-Leiste (siehe setupNav). -->
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <a class="brand" href="#decoder" aria-label="Zum Decoder"><span class="brand-mark" aria-hidden="true">8</span><span>Neuronales Netz <span class="brand-sub">from scratch</span></span></a>
+    <nav class="tabs" id="tabs" aria-label="Bereiche">
+      <button type="button" data-group="decoder">Decoder</button>
+      <button type="button" data-group="zeichnen">Zeichnen</button>
+      <button type="button" data-group="rechnen">So rechnet es</button>
+      <button type="button" data-group="lernen">Training</button>
+      <button type="button" data-group="ergebnisse">Ergebnisse</button>
+    </nav>
+    <button class="theme-btn" id="theme-btn" type="button" title="Farbschema wechseln">Schema: System</button>
+  </div>
+</header>
+
+<main>
+<!-- ===================================================================== BEREICH DECODER -->
+<div class="group" data-group="decoder">
+<section class="chapter" id="decoder">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>7-Segment-Decoder</h2>
+      <p>Ziffer wählen: Das Netz 4 → 16 → 7 macht aus 4 Bits die Segmente. Je heller, desto sicherer.</p>
+    </div>
+    <div class="bench">
+      <div class="card">
+        <h3>Eingabe</h3>
+        <div class="digit-pad" id="digit-pad"></div>
+        <p class="pad-legend">A–F (gestrichelt) wurden nie trainiert.</p>
+        <div class="bits" id="bits"></div>
+        <details class="more">
+          <summary>Feinregler und Rauschen</summary>
+          <div class="bits" id="fine"></div>
+          <div class="btn-row">
+            <button class="btn" id="noise-btn" type="button">Rauschen</button>
+            <button class="btn" id="snap-btn" type="button">Auf 0/1 runden</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card graph-card">
+        <div class="graph-toolbar">
+          <div><span class="label">Kanten zeigen</span>
+            <span class="seg-ctl" id="mode-ctl" role="group" aria-label="Kanten zeigen">
+              <button type="button" data-mode="gewicht" aria-pressed="true">Gewicht w</button>
+              <button type="button" data-mode="signal" aria-pressed="false">Signal w·a</button>
+              <button type="button" data-mode="gradient" aria-pressed="false">Gradient −∂J/∂w</button>
+            </span>
+          </div>
+          <span class="small muted" id="graph-hint">Neuron anklicken für Details</span>
+        </div>
+        <svg class="net" id="bench-graph" role="img" aria-label="Netzgraph 4-16-7"></svg>
+        <div class="legend" id="bench-legend"></div>
+      </div>
+
+      <div class="card">
+        <h3>Ausgabe</h3>
+        <p class="sub">Helligkeit = Aktivierung des Segments</p>
+        <div class="display-wrap">
+          <svg id="bench-display" viewBox="0 0 112 172" aria-label="7-Segment-Anzeige"></svg>
+          <div class="display-caption" id="display-cap"></div>
+        </div>
+        <div class="bars" id="out-bars"></div>
+        <div class="verdict" id="verdict"></div>
+      </div>
+    </div>
+    <div class="card strip-card">
+      <h3>Alle 16 Eingaben</h3>
+      <p class="sub" id="strip-summary"></p>
+      <div class="digit-strip" id="digit-strip"></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ===================================================================== BEREICH ZEICHNEN (Phase 9) -->
+<div class="group" data-group="zeichnen">
+<section class="chapter" id="zeichnen">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Ziffer zeichnen</h2>
+      <p>Eine Ziffer 0–9 malen. Ein zweites eigenes Netz, trainiert auf 60 000 MNIST-Ziffern, rät live mit.</p>
+    </div>
+    <div class="draw-bench">
+      <div class="card">
+        <h3>Zeichenfeld</h3>
+        <p class="sub">Maus, Stift oder Finger · Größe egal</p>
+        <canvas class="draw-pad" id="draw-pad" width="560" height="560" aria-label="Zeichenfeld für eine Ziffer"></canvas>
+        <div class="btn-row">
+          <button class="btn primary" id="draw-clear" type="button">Löschen</button>
+          <button class="btn" id="draw-undo" type="button">Rückgängig</button>
+          <button class="btn" id="draw-sample" type="button">Testbild</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="draw-split">
+          <div>
+            <h3>Eingabe</h3>
+            <p class="sub" id="draw-input-sub"></p>
+            <canvas class="pix" id="draw-input" width="14" height="14" aria-label="Die Zeichnung als Pixel-Eingabe des Netzes"></canvas>
+          </div>
+          <div>
+            <h3 id="draw-feats-title">Hidden-Neuronen</h3>
+            <p class="sub">Gewichte als Bild · hell = aktiv · Rahmen = stärkster Beitrag</p>
+            <div class="feat-grid" id="draw-feats"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Erkennung</h3>
+        <p class="sub" id="draw-acc"></p>
+        <div class="guess"><div class="digit leer" id="draw-guess">?</div><div class="p" id="draw-prob">zeichne eine Ziffer</div></div>
+        <div class="bars prob" id="draw-bars"></div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ===================================================================== BEREICH SO RECHNET ES -->
+<div class="group" data-group="rechnen">
+<div class="group-head">
+  <div class="wrap">
+    <div class="inbar"><span class="inbar-label">Eingabe</span><div class="inbar-pad" id="inbar-pad"></div><span class="inbar-out" id="inbar-out"></span></div>
+    <nav class="subtabs" aria-label="Kapitel">
+      <button type="button" data-sec="rechenweg">Schritt für Schritt</button>
+      <button type="button" data-sec="neuron">Ein Neuron</button>
+      <button type="button" data-sec="gewichte">Alle Gewichte</button>
+      <button type="button" data-sec="ziffern">Alle Eingaben</button>
+      <button type="button" data-sec="backprop">Lernen</button>
+    </nav>
+  </div>
+</div>
+<section class="chapter" id="rechenweg">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Forward-Pass Schritt für Schritt</h2>
+      <p>Die Formeln der Angabe mit echten Zahlen. Zeile anklicken zeigt die Rechnung des Neurons.</p>
+    </div>
+    <ol class="steps" id="steps"></ol>
+    <div class="step-layout">
+      <div class="card graph-card">
+        <svg class="net" id="step-graph" role="img" aria-label="Netzgraph im aktuellen Rechenschritt"></svg>
+        <div class="btn-row">
+          <button class="btn" id="step-prev" type="button">← Zurück</button>
+          <button class="btn primary" id="step-next" type="button">Weiter →</button>
+          <button class="btn" id="step-play" type="button">Abspielen</button>
+        </div>
+      </div>
+      <div class="card step-body" id="step-body"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================== NEURON -->
+<section class="chapter" id="neuron">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Ein Neuron unter der Lupe</h2>
+      <p><code>z = w·x + b</code>, <code>a = σ(z)</code>: Gewichte, Lage auf der Kurve, Reaktion auf alle Eingaben.</p>
+    </div>
+    <div class="insp-head">
+      <h3 id="insp-title"></h3>
+      <label class="small muted">Neuron wählen
+        <select id="insp-select"></select>
+      </label>
+    </div>
+    <div class="grid-3">
+      <div class="card">
+        <h3>Rechnung</h3>
+        <p class="sub">für die aktuelle Eingabe</p>
+        <dl class="kv" id="insp-kv"></dl>
+        <div style="margin-top:14px"><svg class="chart" id="insp-sigmoid" viewBox="0 0 300 190"></svg></div>
+        <p class="small muted" style="margin-top:6px">Steigung σ′ = a·(1−a): Weit außen ist sie fast 0, dann lernt das Neuron kaum.</p>
+      </div>
+      <div class="card">
+        <h3>Eingehende Gewichte</h3>
+        <p class="sub" id="insp-in-sub"></p>
+        <svg class="chart" id="insp-in" viewBox="0 0 300 200"></svg>
+        <h3 style="margin-top:18px" id="insp-out-title">Ausgehende Gewichte</h3>
+        <p class="sub" id="insp-out-sub"></p>
+        <svg class="chart" id="insp-out" viewBox="0 0 300 170"></svg>
+      </div>
+      <div class="card">
+        <h3>Worauf es anspricht</h3>
+        <p class="sub">Aktivierung a für alle 16 möglichen Eingaben</p>
+        <svg class="chart" id="insp-resp" viewBox="0 0 300 200"></svg>
+        <p class="small muted" id="insp-resp-note" style="margin-top:8px"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================== GEWICHTE -->
+<section class="chapter" id="gewichte">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Alle 199 Parameter</h2>
+      <p>Zeile = Neuron, Spalte = Eingang, letzte Spalte = Bias. Teal verstärkt, Magenta hemmt.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>W[1] und b[1] · Eingabe → Hidden</h3>
+        <p class="sub">16 Neuronen × (4 Gewichte + Bias) = 80 Parameter</p>
+        <div class="scroll-x"><svg class="heat" id="heat-w1"></svg></div>
+        <div class="scale-bar" id="scale-w1"></div>
+      </div>
+      <div class="card">
+        <h3>W[2] und b[2] · Hidden → Segmente</h3>
+        <p class="sub">7 Neuronen × (16 Gewichte + Bias) = 119 Parameter</p>
+        <div class="scroll-x"><svg class="heat" id="heat-w2"></svg></div>
+        <div class="scale-bar" id="scale-w2"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================== ALLE ZIFFERN -->
+<section class="chapter" id="ziffern">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Alle 16 Eingaben</h2>
+      <p>Welches Muster jede Eingabe in der Hidden-Schicht erzeugt, und was am Ende herauskommt.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Hidden-Aktivierungen A[1]</h3>
+        <p class="sub">Zeile = Eingabe 0–15, Spalte = Hidden-Neuron h0–h15</p>
+        <div class="scroll-x"><svg class="heat" id="heat-hidden"></svg></div>
+      </div>
+      <div class="card">
+        <h3>Ausgaben A[2] gegen Sollwerte</h3>
+        <p class="sub">Zeile = Ziffer 0–9, Spalte = Segment. Kreis = Soll 1, rot umrandet = falsch nach Schwelle 0,5</p>
+        <div class="scroll-x"><svg class="heat" id="heat-out"></svg></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================== BACKPROP -->
+<section class="chapter" id="backprop">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Ein Lernschritt: Backpropagation</h2>
+      <p>Fehler messen, per Kettenregel zurückreichen, Gewichte anpassen, hier für die aktuelle Ziffer.</p>
+    </div>
+    <div id="bp-root"></div>
+  </div>
+</section>
+</div>
+
+<!-- ===================================================================== BEREICH TRAINING -->
+<div class="group" data-group="lernen">
+<div class="group-head">
+  <div class="wrap">
+    <nav class="subtabs" aria-label="Kapitel">
+      <button type="button" data-sec="training">Verlauf und TensorFlow</button>
+      <button type="button" data-sec="live">Live-Training</button>
+      <button type="button" data-sec="xor">XOR</button>
+    </nav>
+  </div>
+</div>
+
+<!-- ===================================================================== TRAINING -->
+<section class="chapter" id="training">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Trainingsverlauf und TensorFlow</h2>
+      <p>Kosten J pro Epoche (logarithmisch), rechts gegen TensorFlow.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Eigene Implementierung</h3>
+        <p class="sub" id="loss-sub"></p>
+        <svg class="chart" id="loss-own" viewBox="0 0 520 300"></svg>
+        <div class="legend" id="loss-own-legend"></div>
+      </div>
+      <div class="card">
+        <div class="insp-head" style="margin-bottom:6px">
+          <h3>Gegen TensorFlow</h3>
+          <span class="seg-ctl" id="tf-ctl" role="group" aria-label="Netz für den TensorFlow-Vergleich"></span>
+        </div>
+        <p class="sub" id="tf-sub"></p>
+        <div id="tf-chart-wrap"><svg class="chart" id="loss-tf" viewBox="0 0 520 300"></svg></div>
+        <div class="legend" id="loss-tf-legend"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Kennzahlen</h3>
+      <p class="sub">20 000 Epochen, α = 0,1, SGD mit einem Sample pro Schritt, Sigmoid überall</p>
+      <div class="scroll-x" id="tf-table"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================== LIVE -->
+<section class="chapter" id="live">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Live-Training</h2>
+      <p>Ein neues Netz lernt hier im Browser von null an, mit demselben Algorithmus wie <code>nn/</code>.</p>
+    </div>
+    <div class="card">
+      <details class="more live-more">
+      <summary>Einstellungen</summary>
+      <div class="live-ctl">
+        <label for="live-hidden">Hidden-Neuronen
+          <select id="live-hidden"><option>2</option><option>4</option><option>8</option><option selected>16</option><option>32</option></select>
+        </label>
+        <label for="live-lr">Lernrate α: <span class="num" id="live-lr-out">0.10</span>
+          <input type="range" id="live-lr" min="-2" max="0.5" step="0.05" value="-1">
+        </label>
+        <label for="live-init">Startgewichte
+          <select id="live-init"><option value="klein">klein (σ = 0,1)</option><option value="xavier">Xavier/Glorot</option></select>
+        </label>
+        <label for="live-speed">Epochen pro Bild: <span class="num" id="live-speed-out">20</span>
+          <input type="range" id="live-speed" min="0" max="3" step="0.1" value="1.3">
+        </label>
+      </div>
+      </details>
+      <div class="btn-row" style="margin:0 0 14px">
+        <button class="btn primary" id="live-run" type="button">Training starten</button>
+        <button class="btn" id="live-step" type="button">1 Epoche</button>
+        <button class="btn" id="live-reset" type="button">Neue Startgewichte</button>
+        <span class="small muted" id="live-seed" style="align-self:center"></span>
+      </div>
+      <dl class="stat-row" id="live-stats"></dl>
+      <div class="grid-2">
+        <div>
+          <svg class="chart" id="live-loss" viewBox="0 0 520 260"></svg>
+        </div>
+        <div style="display:grid; gap:10px; align-content:start">
+          <div class="live-digits" id="live-digits"></div>
+          <svg class="net" id="live-graph" role="img" aria-label="Netzgraph des live trainierten Netzes"></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================================== XOR -->
+<section class="chapter" id="xor">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>XOR: warum eine Hidden-Schicht nötig ist</h2>
+      <p>Eine Gerade reicht für XOR nicht. Zwei Hidden-Neuronen ziehen je eine (gestrichelt), der Ausgang kombiniert sie.
+        In die Fläche klicken zum Testen.</p>
+    </div>
+    <div class="xor-planes">
+      <div class="card">
+        <h3>Ausgabe ŷ über der Eingabeebene</h3>
+        <p class="sub" id="xor-sub"></p>
+        <div class="plane main" id="xor-main"><canvas width="320" height="320"></canvas><svg viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div>
+        <div class="scale-bar"><span>0</span><span class="grad" id="xor-scale"></span><span>1</span><span style="margin-left:10px">Linie = Entscheidungsgrenze ŷ = 0,5</span></div>
+      </div>
+      <div style="display:grid; gap:16px">
+        <div class="card">
+          <h3>Netz 2 → 2 → 1</h3>
+          <svg class="net" id="xor-graph" role="img" aria-label="Netzgraph XOR"></svg>
+        </div>
+        <div class="card">
+          <h3>Was die Hidden-Neuronen sehen</h3>
+          <p class="sub">Aktivierung von h0 und h1 über derselben Ebene</p>
+          <div class="hid-planes">
+            <div><div class="plane" id="xor-h0"><canvas width="160" height="160"></canvas><svg viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div><p class="plane-cap" id="xor-h0-cap"></p></div>
+            <div><div class="plane" id="xor-h1"><canvas width="160" height="160"></canvas><svg viewBox="0 0 1 1" preserveAspectRatio="none"></svg></div><p class="plane-cap" id="xor-h1-cap"></p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3>Die vier Trainingspunkte</h3>
+      <div class="scroll-x" id="xor-table"></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<!-- ===================================================================== BEREICH ERGEBNISSE -->
+<div class="group" data-group="ergebnisse">
+<div class="group-head">
+  <div class="wrap">
+    <nav class="subtabs" aria-label="Kapitel">
+      <button type="button" data-sec="nachweis">Überblick und Nachweis</button>
+      <button type="button" data-sec="experimente">Experimente</button>
+    </nav>
+  </div>
+</div>
+<section class="chapter" id="nachweis">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Rechnen alle Implementierungen dasselbe?</h2>
+      <p>Python, C (<code>.txt</code> und <code>.h</code>), TensorFlow und Browser müssen auf 10⁻⁹ gleich rechnen.</p>
+    </div>
+    <dl class="facts card" id="facts"></dl>
+    <div class="card">
+      <div class="scroll-x" id="proof-table"></div>
+      <p class="note" style="margin-top:14px">10⁻¹⁶ ist die letzte Binärstelle (andere Summenreihenfolge). Die Gewichte sind überall bit-identisch.</p>
+    </div>
+  </div>
+</section>
+
+<section class="chapter" id="experimente">
+  <div class="wrap">
+    <div class="chapter-head">
+      <h2>Experimente</h2>
+      <p>Was das Netz zuverlässig, schnell und robust macht: Hunderte Trainingsläufe aus <code>experimente/</code>.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Seed-Studie XOR: lokale Minima</h3>
+        <p class="sub" id="exp-seed-sub">100 Seeds je Konfiguration, α = 0,1</p>
+        <svg class="chart" id="exp-seed" viewBox="0 0 520 280"></svg>
+        <div class="legend" id="exp-seed-legend"></div>
+        <p class="small muted" id="exp-seed-note" style="margin-top:8px"></p>
+      </div>
+      <div class="card">
+        <h3>Rauschen auf den Eingängen</h3>
+        <p class="sub">7-Segment, Anteil komplett richtiger Ziffern bei Eingang = Bit + Rauschen(σ)</p>
+        <svg class="chart" id="exp-noise" viewBox="0 0 520 280"></svg>
+        <div class="legend" id="exp-noise-legend"></div>
+        <p class="small muted" id="exp-noise-note" style="margin-top:8px"></p>
+      </div>
+      <div class="card">
+        <h3>Aktivierung der Hidden-Schicht</h3>
+        <p class="sub">Ausgabe immer Sigmoid · 20 000 Epochen · Median über alle Seeds</p>
+        <div class="scroll-x" id="exp-act"></div>
+      </div>
+      <div class="card">
+        <h3>Objekte gegen Matrizen</h3>
+        <p class="sub">Neuron-für-Neuron (nn/) gegen vektorisierte Variante, gleiche Startgewichte</p>
+        <div class="scroll-x" id="exp-vec"></div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p id="footer-gen"></p>
+    <p>Erzeugt von <code>visualisierung/export_daten.py</code>.</p>
+  </div>
+</footer>
+
+<div id="tip" hidden></div>
+
+<script>
+// Wird von visualisierung/export_daten.py durch die echten Daten ersetzt.
+const NETZDATEN = /*__NETZDATEN__*/null;
+</script>
+<script>
+"use strict";
+/* =========================================================================================
+   0. Grundlagen
+   ========================================================================================= */
+
+const D = NETZDATEN;
+if (!D) {
+  document.querySelector("main").innerHTML =
+    '<div class="wrap"><p class="empty-msg">Diese Vorlage enthält noch keine Netzdaten. ' +
+    'Bitte <code>python visualisierung/export_daten.py</code> ausführen und <code>visualisierung/index.html</code> öffnen.</p></div>';
+  throw new Error("Keine Netzdaten");
+}
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** SVG-Element anlegen. attrs: Attribute, parent: optional anhängen. */
+function svgEl(tag, attrs = {}, parent = null) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/** HTML-Element anlegen; Kinder dürfen Strings oder Elemente sein. */
+function h(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const k in attrs) {
+    if (k === "class") e.className = attrs[k];
+    else if (k === "html") e.innerHTML = attrs[k];
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), attrs[k]);
+    else e.setAttribute(k, attrs[k]);
+  }
+  for (const c of children.flat()) if (c != null) e.append(c);
+  return e;
+}
+
+const MINUS = "−";
+/** Zahl mit festen Nachkommastellen und echtem Minuszeichen. */
+function fmt(v, d = 3) {
+  if (!Number.isFinite(v)) return String(v);
+  const s = Math.abs(v).toFixed(d);
+  return (v < 0 && Number(s) !== 0 ? MINUS : "") + s;
+}
+/** Zahl mit Vorzeichen (+/−). */
+function fmtS(v, d = 3) { return (v >= 0 ? "+" : "") + fmt(v, d); }
+/** Wissenschaftliche Schreibweise, z.B. 2.2·10⁻¹⁶ */
+function fmtE(v) {
+  if (v === 0) return "0";
+  const exp = Math.floor(Math.log10(Math.abs(v)));
+  const mant = v / Math.pow(10, exp);
+  const sup = String(exp).replace("-", "⁻").replace(/\d/g, d => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+  return `${mant.toFixed(1)}·10${sup}`;
+}
+const SEG = D.segmente;                     // ["a", ..., "g"]
+const SUB = n => String(n).replace(/\d/g, d => "₀₁₂₃₄₅₆₇₈₉"[d]);
+
+/* ---------- Farben: aus den CSS-Tokens gelesen, damit beide Farbschemata stimmen ---------- */
+let C = {};
+function readColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const get = n => cs.getPropertyValue(n).trim();
+  C = {};
+  for (const n of ["paper", "panel", "sunk", "ink", "ink-2", "ink-3", "rule", "led", "pos", "neg", "ok", "bad", "seg-off", "display", "focus"]) {
+    C[n] = hexToRgb(get("--" + n));
+  }
+}
+function hexToRgb(hex) {
+  hex = hex.replace("#", "");
+  if (hex.length === 3) hex = hex.split("").map(c => c + c).join("");
+  const n = parseInt(hex, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+const rgb = c => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const clamp01 = t => Math.max(0, Math.min(1, t));
+/** Aktivierung 0..1 -> Farbe von "aus" (sunk) bis LED. */
+function actColor(a) { return rgb(mix(C.sunk, C.led, clamp01(a))); }
+/** Vorzeichenbehafteter Wert -> Teal (positiv) / Magenta (negativ), Stärke |v|/max. */
+function divColor(v, max, base = C.panel) {
+  const t = max > 0 ? clamp01(Math.abs(v) / max) : 0;
+  return rgb(mix(base, v >= 0 ? C.pos : C.neg, Math.pow(t, 0.8)));
+}
+/** Textfarbe, die auf einer Zellfarbe lesbar bleibt. */
+function inkOn(fillRgbString) {
+  const m = fillRgbString.match(/\d+/g).map(Number);
+  const lum = (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+  return lum > 0.55 ? "#141b22" : "#f4f6f8";
+}
+
+/* =========================================================================================
+   1. Mathematik -- dieselben Formeln wie nn/neuron.py, nn/layer.py, nn/network.py
+   ========================================================================================= */
+
+const ACT = {
+  sigmoid: z => 1 / (1 + Math.exp(-z)),     // σ(z) = 1 / (1 + e^(−z))
+  tanh: z => Math.tanh(z),
+  relu: z => (z > 0 ? z : 0),
+  linear: z => z,
+};
+/** Softmax über die ganze Schicht (wie nn/activations.softmax): a_i = e^(z_i − max) / Σ e^(z_j − max). */
+function softmax(z) {
+  const m = Math.max(...z), e = z.map(v => Math.exp(v - m)), s = e.reduce((a, b) => a + b, 0);
+  return e.map(v => v / s);
+}
+const DACT = {                                // Ableitung f'(z), Signatur (z, a) wie activations.py
+  sigmoid: (z, a) => a * (1 - a),             // σ'(z) = a·(1−a)
+  tanh: (z, a) => 1 - a * a,
+  relu: (z, a) => (z > 0 ? 1 : 0),
+};
+
+/** Netz aus dem JSON-Format von nn/persistence.py: W[l][k][j] = Gewicht von Neuron k auf Eingang j. */
+function netFromModel(m) {
+  return {
+    sizes: m.layer_sizes.slice(),
+    layers: m.layers.map(L => ({
+      act: L.activation,
+      W: L.neurons.map(n => n.weights.slice()),
+      b: L.neurons.map(n => n.bias),
+    })),
+  };
+}
+function cloneNet(net) {
+  return { sizes: net.sizes.slice(), layers: net.layers.map(L => ({ act: L.act, W: L.W.map(r => r.slice()), b: L.b.slice() })) };
+}
+
+/**
+ * Forward-Pass. Rückgabe: { A: [A0=X, A1, A2, ...], Z: [Z1, Z2, ...] }
+ * Z[l][k] = Σ_j W[k][j]·A[l][j] + b[k]   (erst die Summe, dann der Bias -- wie C und numpy)
+ */
+function forward(net, x) {
+  const A = [x.slice()], Z = [];
+  let a = x;
+  for (const L of net.layers) {
+    const f = ACT[L.act];
+    const z = L.W.map((row, k) => {
+      let s = 0;
+      for (let j = 0; j < row.length; j++) s += row[j] * a[j];
+      return s + L.b[k];
+    });
+    a = L.act === "softmax" ? softmax(z) : z.map(f);   // Softmax wirkt auf die ganze Schicht
+    Z.push(z); A.push(a);
+  }
+  return { A, Z };
+}
+
+/**
+ * Backpropagation für ein Sample, OHNE Update. Rückgabe pro Schicht l:
+ *   delta[l][k]  = ∂J/∂Z   (Fehler am Neuron)
+ *   gradW[l][k][j] = delta·A_vorher[j],  gradB[l][k] = delta
+ * J = ½·Σ(A−Y)²  ->  ∂J/∂A_letzte = A − Y.  Hidden: ∂J/∂A[l] = W[l+1]ᵀ·delta[l+1]
+ */
+function backprop(net, x, y) {
+  const t = forward(net, x);
+  const nL = net.layers.length;
+  const delta = new Array(nL), gradW = new Array(nL), gradB = new Array(nL);
+  const out = t.A[nL];
+  let err = out.map((a, i) => a - y[i]);                        // ∂J/∂A = A − Y
+  const J = 0.5 * out.reduce((s, a, i) => s + (a - y[i]) ** 2, 0);
+  for (let l = nL - 1; l >= 0; l--) {
+    const L = net.layers[l], z = t.Z[l], a = t.A[l + 1], prev = t.A[l];
+    const d = err.map((e, k) => e * DACT[L.act](z[k], a[k]));   // δ = ∂J/∂A · f'(z)
+    delta[l] = d;
+    gradW[l] = d.map(dk => prev.map(p => dk * p));               // ∂J/∂W = δ·A_vorherᵀ
+    gradB[l] = d.slice();                                        // ∂J/∂b = δ
+    if (l > 0) {                                                 // Fehler für die Vorschicht, ALTE Gewichte
+      err = prev.map((_, j) => L.W.reduce((s, row, k) => s + d[k] * row[j], 0));
+    }
+  }
+  return { t, J, delta, gradW, gradB };
+}
+
+/** Ein SGD-Schritt: W = W − α·∂J/∂W. Verändert net. Rückgabe: J vor dem Update. */
+function sgdStep(net, x, y, lr) {
+  const g = backprop(net, x, y);
+  net.layers.forEach((L, l) => {
+    L.W.forEach((row, k) => { for (let j = 0; j < row.length; j++) row[j] -= lr * g.gradW[l][k][j]; });
+    L.b.forEach((_, k) => { L.b[k] -= lr * g.gradB[l][k]; });
+  });
+  return g.J;
+}
+
+/** Reproduzierbarer Zufall (mulberry32) und Normalverteilung (Box-Muller) für das Live-Training. */
+function rng(seed) {
+  let s = seed >>> 0;
+  const u = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  return { u, n: () => Math.sqrt(-2 * Math.log(u() + 1e-12)) * Math.cos(2 * Math.PI * u()) };
+}
+/** Neues Netz wie nn/layer.py: Gewichte randn·std, Bias 0. init "klein" (0,1) oder "xavier". */
+function randomNet(sizes, init, seed) {
+  const r = rng(seed);
+  return {
+    sizes: sizes.slice(),
+    layers: sizes.slice(1).map((n, i) => {
+      const m = sizes[i];
+      const std = init === "xavier" ? Math.sqrt(2 / (m + n)) : 0.1;
+      return { act: "sigmoid", W: Array.from({ length: n }, () => Array.from({ length: m }, () => r.n() * std)), b: new Array(n).fill(0) };
+    }),
+  };
+}
+
+/* ---------- Daten ---------- */
+const SEVEN = D.netze["7seg"];
+const XORD = D.netze["xor"];
+const NET = netFromModel(SEVEN.modell);
+const XNET = netFromModel(XORD.modell);
+const TARGETS = SEVEN.targets;                // 10 × 7, Tabelle aus der Angabe
+const bitsOf = d => [(d >> 3) & 1, (d >> 2) & 1, (d >> 1) & 1, d & 1];   // höchstwertiges Bit zuerst
+const ALL16 = Array.from({ length: 16 }, (_, d) => bitsOf(d));
+const nParams = net => net.layers.reduce((s, L) => s + L.W.length * (L.W[0].length + 1), 0);
+
+/** Thresholded Segmente -> Ziffer 0–9, oder -1 wenn das Muster keiner Ziffer entspricht. */
+function decode(out) {
+  const bits = out.map(v => (v > 0.5 ? 1 : 0));
+  return TARGETS.findIndex(t => t.every((v, i) => v === bits[i]));
+}
+/** Sicherheit = Abstand des unsichersten Segments zur Schwelle, auf 0..100 % skaliert. */
+const certainty = out => Math.min(...out.map(v => Math.abs(v - 0.5))) * 2;
+
+/* =========================================================================================
+   2. Bausteine
+   ========================================================================================= */
+
+/* ---------- Tooltip: jedes Element mit data-tip zeigt beim Überfahren seinen Text ---------- */
+const tip = $("#tip");
+document.addEventListener("pointermove", e => {
+  const t = e.target.closest ? e.target.closest("[data-tip]") : null;
+  if (!t) { tip.hidden = true; return; }
+  tip.textContent = t.getAttribute("data-tip");
+  tip.hidden = false;
+  const w = tip.offsetWidth, hgt = tip.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y + hgt > innerHeight - 8) y = e.clientY - hgt - 14;
+  tip.style.left = Math.max(8, x) + "px";
+  tip.style.top = Math.max(8, y) + "px";
+});
+document.addEventListener("pointerleave", () => { tip.hidden = true; });
+addEventListener("scroll", () => { tip.hidden = true; }, { passive: true });
+
+/* ---------- 7-Segment-Anzeige ---------- */
+// Segmentformen im Koordinatensystem 0..100 × 0..170 (sechseckige "Balken").
+const SEG_SHAPES = (() => {
+  const t = 12, hz = (y, x1, x2) => [[x1, y], [x1 + t / 2, y - t / 2], [x2 - t / 2, y - t / 2], [x2, y], [x2 - t / 2, y + t / 2], [x1 + t / 2, y + t / 2]];
+  const vt = (x, y1, y2) => [[x, y1], [x + t / 2, y1 + t / 2], [x + t / 2, y2 - t / 2], [x, y2], [x - t / 2, y2 - t / 2], [x - t / 2, y1 + t / 2]];
+  return {
+    a: hz(10, 14, 86), b: vt(90, 14, 83), c: vt(90, 87, 156), d: hz(160, 14, 86),
+    e: vt(10, 87, 156), f: vt(10, 14, 83), g: hz(85, 14, 86),
+  };
+})();
+/** Baut eine Anzeige in ein <svg>. Rückgabe: update(werte[7], scharf) */
+function sevenSeg(svg) {
+  svg.setAttribute("viewBox", "0 0 112 172");
+  const g = svgEl("g", { transform: "translate(8,1) skewX(-6) translate(8,0)" }, svg);
+  const polys = SEG.map(s => svgEl("polygon", { points: SEG_SHAPES[s].map(p => p.join(",")).join(" ") }, g));
+  return (vals, crisp = false) => {
+    polys.forEach((p, i) => {
+      const v = crisp ? (vals[i] > 0.5 ? 1 : 0) : clamp01(vals[i]);
+      p.setAttribute("fill", rgb(mix(C["seg-off"], C.led, v)));
+      p.style.filter = v > 0.15 ? `drop-shadow(0 0 ${(2 + 5 * v).toFixed(1)}px ${rgb(C.led)})` : "none";
+      p.setAttribute("data-tip", `Segment ${SEG[i]}\nAktivierung ${fmt(vals[i], 4)}\n→ ${vals[i] > 0.5 ? "leuchtet" : "aus"} (Schwelle 0,5)`);
+    });
+  };
+}
+
+/* ---------- Netzgraph ---------- */
+/**
+ * Zeichnet ein Feedforward-Netz als SVG und aktualisiert es effizient (Elemente bleiben erhalten).
+ * opts: inLabels, outLabels, colTitles, height, onSelect(layerIndex, k)
+ * update(net, trace, {mode, stage, sel, grad})
+ *   mode:  "gewicht" | "signal" | "gradient"   (was die Kanten zeigen)
+ *   stage: 0..5 für den Rechenweg (welche Schichten schon berechnet sind), 99 = alles
+ *   sel:   {layer, k} markiertes Neuron (layer = Index der Gewichtsschicht, 0 = Hidden)
+ */
+function makeGraph(svg, sizes, opts = {}) {
+  svg.innerHTML = "";
+  const W = 640, H = opts.height || 520;
+  const padX = opts.padX ?? 92, padT = 28, padB = 12;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const n = sizes.length;
+  const xs = sizes.map((_, i) => padX + i * (W - 2 * padX) / (n - 1));
+  const maxN = Math.max(...sizes);
+  const spacing = Math.min(opts.maxSpacing || 46, (H - padT - padB) / maxN);
+  const r = Math.min(opts.radius || 13, spacing * 0.42);
+  const ys = sizes.map(s => Array.from({ length: s }, (_, k) => padT + (H - padT - padB) / 2 + (k - (s - 1) / 2) * spacing));
+
+  const titles = opts.colTitles || sizes.map((s, i) => (i === 0 ? "Eingabe" : i === n - 1 ? "Ausgabe" : "Hidden"));
+  titles.forEach((t, i) => { const e = svgEl("text", { x: xs[i], y: 10, class: "col-title" }, svg); e.textContent = t; });
+
+  const gEdges = svgEl("g", {}, svg), gNodes = svgEl("g", {}, svg);
+  const edges = [];   // edges[l][k][j]
+  for (let l = 0; l < n - 1; l++) {
+    edges.push(Array.from({ length: sizes[l + 1] }, (_, k) => Array.from({ length: sizes[l] }, (_, j) =>
+      svgEl("line", { x1: xs[l] + r, y1: ys[l][j], x2: xs[l + 1] - r, y2: ys[l + 1][k], class: "edge", "stroke-linecap": "round" }, gEdges))));
+  }
+  const nodes = sizes.map((s, i) => Array.from({ length: s }, (_, k) => {
+    const g = svgEl("g", { class: "node", transform: `translate(${xs[i]},${ys[i][k]})`, tabindex: i > 0 ? "0" : "-1" }, gNodes);
+    const c = svgEl("circle", { r }, g);
+    const t = svgEl("text", {}, g);
+    if (r < 9) t.style.display = "none";
+    return { g, c, t, i, k };
+  }));
+  (opts.inLabels || []).forEach((lab, k) => { const e = svgEl("text", { x: xs[0] - r - 8, y: ys[0][k], class: "lbl", "text-anchor": "end" }, svg); e.textContent = lab; });
+  (opts.outLabels || []).forEach((lab, k) => { const e = svgEl("text", { x: xs[n - 1] + r + 8, y: ys[n - 1][k], class: "lbl" }, svg); e.textContent = lab; });
+
+  // Hervorhebung beim Überfahren: Kanten des Neurons bleiben, der Rest wird blass
+  const hot = (i, k, on) => {
+    svg.classList.toggle("focus", on);
+    if (!on) { svg.querySelectorAll(".hot").forEach(e => e.classList.remove("hot")); return; }
+    nodes[i][k].g.classList.add("hot");
+    if (i > 0) edges[i - 1][k].forEach((e, j) => { e.classList.add("hot"); nodes[i - 1][j].g.classList.add("hot"); });
+    if (i < n - 1) edges[i].forEach((row, kk) => { row[k].classList.add("hot"); nodes[i + 1][kk].g.classList.add("hot"); });
+  };
+  nodes.forEach((col, i) => col.forEach((nd, k) => {
+    nd.g.addEventListener("pointerenter", () => hot(i, k, true));
+    nd.g.addEventListener("pointerleave", () => hot(i, k, false));
+    if (i > 0 && opts.onSelect) {
+      nd.g.addEventListener("click", () => opts.onSelect(i - 1, k));
+      nd.g.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); opts.onSelect(i - 1, k); } });
+    }
+  }));
+
+  const nameOf = (i, k) => (i === 0 ? (opts.inNames || [])[k] || `x${SUB(k)}` : i === n - 1 ? (opts.outNames || [])[k] || `y${SUB(k)}` : `h${k}`);
+
+  function update(net, tr, o = {}) {
+    const mode = o.mode || "gewicht", stage = o.stage ?? 99, sel = o.sel, grad = o.grad;
+    // Stufen des Rechenwegs: 1 = Z1, 2 = A1, 3 = Z2, 4 = A2, 5 = Schwelle
+    for (let l = 0; l < n - 1; l++) {
+      const L = net.layers[l], src = tr.A[l];
+      const active = stage === 99 || stage >= 2 * l + 1;
+      const val = (k, j) => mode === "signal" ? L.W[k][j] * src[j] : mode === "gradient" && grad ? -grad.gradW[l][k][j] : L.W[k][j];
+      let max = 1e-12;
+      L.W.forEach((row, k) => row.forEach((_, j) => { max = Math.max(max, Math.abs(val(k, j))); }));
+      L.W.forEach((row, k) => row.forEach((w, j) => {
+        const v = val(k, j), t = Math.abs(v) / max, e = edges[l][k][j];
+        e.setAttribute("stroke", rgb(v >= 0 ? C.pos : C.neg));
+        e.setAttribute("stroke-width", (0.4 + 4.4 * t).toFixed(2));
+        e.setAttribute("stroke-opacity", active ? (0.08 + 0.85 * Math.pow(t, 0.9)).toFixed(3) : "0.06");
+        const from = nameOf(l, j), to = nameOf(l + 1, k);
+        let s = `${from} → ${to}\nGewicht w = ${fmt(w, 4)}\nSignal w·a = ${fmt(w, 3)} · ${fmt(src[j], 3)} = ${fmt(w * src[j], 4)}`;
+        if (grad) s += `\n∂J/∂w = δ·a = ${fmt(grad.gradW[l][k][j], 5)}`;
+        e.setAttribute("data-tip", s);
+      }));
+    }
+    nodes.forEach((col, i) => col.forEach((nd, k) => {
+      let fill, label, tipText;
+      if (i === 0) {
+        const a = tr.A[0][k];
+        fill = actColor(a); label = fmt(a, 2);
+        tipText = `${nameOf(0, k)}\nEingabe = ${fmt(a, 3)}`;
+      } else {
+        const l = i - 1, z = tr.Z[l][k], a = tr.A[i][k];
+        const zStage = 2 * l + 1, aStage = 2 * l + 2;
+        if (stage !== 99 && stage < zStage) { fill = rgb(C.panel); label = ""; }
+        else if (stage !== 99 && stage === zStage) { fill = divColor(z, 8, C.sunk); label = fmt(z, 1); }
+        else if (stage === 5 && i === n - 1) { fill = a > 0.5 ? rgb(C.led) : rgb(C.sunk); label = a > 0.5 ? "1" : "0"; }
+        else { fill = actColor(a); label = fmt(a, 2).replace(/^0\./, ".").replace(/^−0\./, "−."); }
+        tipText = `${i === n - 1 ? "Ausgabe-Neuron" : "Hidden-Neuron"} ${nameOf(i, k)}\nz = w·x + b = ${fmt(z, 4)}\na = ${net.layers[l].act}(z) = ${fmt(a, 4)}`;
+        if (grad) tipText += `\nδ = ∂J/∂z = ${fmt(grad.delta[l][k], 5)}`;
+        if (opts.onSelect) tipText += `\nKlicken: ${opts.selectHint || "auswählen"}`;
+      }
+      nd.c.setAttribute("fill", fill);
+      nd.c.setAttribute("stroke", rgb(C["ink-3"]));
+      nd.t.textContent = label;
+      nd.t.setAttribute("fill", inkOn(fill));
+      nd.g.setAttribute("data-tip", tipText);
+      nd.g.classList.toggle("sel", !!sel && i > 0 && sel.layer === i - 1 && sel.k === k);
+    }));
+  }
+  return { update };
+}
+
+/** Legende für den Netzgraph, abhängig von der Kantenansicht. */
+function graphLegend(el, mode) {
+  const txt = {
+    gewicht: ["positives Gewicht", "negatives Gewicht", "Dicke = |w|, je Schicht normiert"],
+    signal: ["verstärkt das Ziel-Neuron", "hemmt das Ziel-Neuron", "Dicke = |w·a|, was tatsächlich fließt"],
+    gradient: ["Gewicht würde wachsen", "Gewicht würde schrumpfen", "Dicke = |∂J/∂w| für diese Ziffer"],
+  }[mode];
+  el.innerHTML = "";
+  el.append(
+    h("span", {}, h("i", { style: `background:${rgb(C.pos)}` }), txt[0]),
+    h("span", {}, h("i", { style: `background:${rgb(C.neg)}` }), txt[1]),
+    h("span", {}, h("i", { class: "dot", style: `background:${rgb(C.led)}` }), "Neuron leuchtet = Aktivierung nahe 1"),
+    h("span", {}, txt[2]),
+  );
+}
+
+/* ---------- Heatmap (SVG) ---------- */
+/**
+ * rows × cols Matrix als farbige Zellen.
+ * o: rowLabels, colLabels, color(v, i, j), tip(v, i, j), onClick(i, j), cell (Größe), showVals,
+ *    gapAfterCol (Index, nach dem eine Lücke kommt, z.B. vor dem Bias), extra(i, j, x, y, s, svg)
+ */
+function heatmap(svg, M, o) {
+  svg.innerHTML = "";
+  const rows = M.length, cols = M[0].length, s = o.cell || 26, lw = o.labelW ?? 34, th = o.labelH ?? 22, gap = 2;
+  const gapX = j => (o.gapAfterCol != null && j > o.gapAfterCol ? 8 : 0);
+  const W = lw + cols * (s + gap) + 8 + 4, Hh = th + rows * (s + gap) + 4;
+  svg.setAttribute("viewBox", `0 0 ${W} ${Hh}`);
+  svg.setAttribute("width", W);
+  (o.colLabels || []).forEach((lab, j) => {
+    const t = svgEl("text", { x: lw + j * (s + gap) + gapX(j) + s / 2, y: th / 2, "text-anchor": "middle" }, svg); t.textContent = lab;
+  });
+  for (let i = 0; i < rows; i++) {
+    const y = th + i * (s + gap);
+    if (o.rowLabels) { const t = svgEl("text", { x: lw - 6, y: y + s / 2, "text-anchor": "end" }, svg); t.textContent = o.rowLabels[i]; }
+    for (let j = 0; j < cols; j++) {
+      const x = lw + j * (s + gap) + gapX(j), v = M[i][j], fill = o.color(v, i, j);
+      const r = svgEl("rect", { x, y, width: s, height: s, rx: 2, fill, class: "cell" }, svg);
+      if (o.tip) r.setAttribute("data-tip", o.tip(v, i, j));
+      if (o.onClick) r.addEventListener("click", () => o.onClick(i, j));
+      if (o.showVals) {
+        // WICHTIG: Farbe als style, nicht als fill-Attribut -- die CSS-Regel "svg.heat text"
+        // würde ein Attribut überstimmen, und die Zahl wäre auf kräftigen Zellen unlesbar.
+        const t = svgEl("text", { x: x + s / 2, y: y + s / 2, class: "val", style: `fill:${inkOn(fill)}` }, svg);
+        t.textContent = o.showVals(v, i, j);
+      }
+      if (o.extra) o.extra(i, j, x, y, s, svg);
+    }
+  }
+}
+/** Farbskala unter einer Heatmap. */
+function scaleBar(el, max, label = "") {
+  el.innerHTML = "";
+  el.append(
+    h("span", {}, fmt(-max, 1)),
+    h("span", { class: "grad", style: `background:linear-gradient(90deg, ${rgb(C.neg)}, ${rgb(C.panel)}, ${rgb(C.pos)})` }),
+    h("span", {}, fmtS(max, 1)),
+    h("span", { style: "margin-left:8px" }, label),
+  );
+}
+
+/* ---------- Liniendiagramm mit logarithmischer y-Achse ---------- */
+/**
+ * series: [{name, data:[y...], step (Epochen pro Punkt), color, width, dash}]
+ * o: xMax, yMin, yMax (Zehnerpotenzen), marks: [{x, label, color}]
+ */
+function logChart(svg, series, o) {
+  svg.innerHTML = "";
+  const vb = svg.viewBox.baseVal, W = vb.width, H = vb.height;
+  const m = { l: 52, r: 14, t: 12, b: 34 };
+  const pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const lo = Math.log10(o.yMin), hi = Math.log10(o.yMax);
+  const X = x => m.l + (x / o.xMax) * pw;
+  const Y = y => m.t + (1 - (Math.log10(Math.max(y, o.yMin)) - lo) / (hi - lo)) * ph;
+  const grid = svgEl("g", { class: "grid" }, svg);
+  for (let e = Math.ceil(lo); e <= Math.floor(hi); e++) {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(10 ** e), y2: Y(10 ** e) }, grid);
+    const t = svgEl("text", { x: m.l - 8, y: Y(10 ** e) + 3.5, "text-anchor": "end" }, svg);
+    t.textContent = e === 0 ? "1" : "10" + String(e).replace("-", "⁻").replace(/\d/g, d => "⁰¹²³⁴⁵⁶⁷⁸⁹"[d]);
+  }
+  const xt = o.xTicks || [0, 5000, 10000, 15000, 20000];
+  xt.forEach(x => {
+    svgEl("line", { x1: X(x), x2: X(x), y1: m.t, y2: H - m.b }, grid);
+    const t = svgEl("text", { x: X(x), y: H - m.b + 16, "text-anchor": "middle" }, svg);
+    t.textContent = x.toLocaleString("de-AT");
+  });
+  const xl = svgEl("text", { x: m.l + pw, y: H - 4, "text-anchor": "end" }, svg); xl.textContent = "Epoche";
+  svgEl("line", { x1: m.l, x2: m.l, y1: m.t, y2: H - m.b, class: "axis" }, svg);
+  svgEl("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, class: "axis" }, svg);
+  // Referenzlinie J = 0,01 (Konvergenzkriterium aus dem Plan)
+  if (o.refY) {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(o.refY), y2: Y(o.refY), stroke: rgb(C["ink-3"]), "stroke-dasharray": "2 4", "stroke-width": 1 }, svg);
+    const t = svgEl("text", { x: W - m.r, y: Y(o.refY) - 5, "text-anchor": "end" }, svg); t.textContent = "J = 0,01";
+  }
+  series.forEach(s => {
+    if (!s.data || !s.data.length) return;
+    const pts = s.data.map((y, i) => `${X(Math.min(i * s.step, o.xMax)).toFixed(1)},${Y(y).toFixed(1)}`).join(" ");
+    svgEl("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": s.width || 2, "stroke-dasharray": s.dash || "", "stroke-linejoin": "round", opacity: s.opacity ?? 1 }, svg);
+    const last = s.data[s.data.length - 1];
+    svgEl("circle", { cx: X(Math.min((s.data.length - 1) * s.step, o.xMax)), cy: Y(last), r: 3, fill: s.color }, svg);
+  });
+  (o.marks || []).forEach(mk => {
+    if (mk.x == null) return;
+    svgEl("line", { x1: X(mk.x), x2: X(mk.x), y1: Y(o.refY || o.yMin), y2: H - m.b, stroke: mk.color, "stroke-width": 1, opacity: 0.7 }, svg);
+    svgEl("circle", { cx: X(mk.x), cy: Y(o.refY || o.yMin), r: 3.5, fill: mk.color }, svg);
+  });
+  // Fadenkreuz mit Werten beim Überfahren
+  const cross = svgEl("line", { y1: m.t, y2: H - m.b, stroke: rgb(C["ink-2"]), "stroke-width": 1, opacity: 0 }, svg);
+  const hit = svgEl("rect", { x: m.l, y: m.t, width: pw, height: ph, fill: "transparent" }, svg);
+  hit.addEventListener("pointermove", e => {
+    const p = svg.getScreenCTM().inverse().multiply(new DOMPoint(e.clientX, e.clientY));
+    const ep = Math.round(clamp01((p.x - m.l) / pw) * o.xMax);
+    cross.setAttribute("x1", X(ep)); cross.setAttribute("x2", X(ep)); cross.setAttribute("opacity", 0.5);
+    const lines = series.filter(s => s.data && s.data.length).map(s => {
+      const i = Math.min(s.data.length - 1, Math.round(ep / s.step));
+      return `${s.name}: J = ${s.data[i].toExponential(3)}`;
+    });
+    hit.setAttribute("data-tip", `Epoche ${ep.toLocaleString("de-AT")}\n${lines.join("\n")}`);
+  });
+  hit.addEventListener("pointerleave", () => cross.setAttribute("opacity", 0));
+}
+
+/** Balkendiagramm (vertikal) für vorzeichenbehaftete Werte. */
+function barChart(svg, vals, o = {}) {
+  svg.innerHTML = "";
+  const vb = svg.viewBox.baseVal, W = vb.width, H = vb.height;
+  const m = { l: 34, r: 6, t: 10, b: 24 };
+  const max = o.max || Math.max(1e-9, ...vals.map(Math.abs));
+  const lo = o.unsigned ? 0 : -max, hi = max;
+  const Y = v => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const bw = (W - m.l - m.r) / vals.length;
+  const g = svgEl("g", { class: "grid" }, svg);
+  const ticks = o.unsigned ? [0, 0.5, 1] : [-max, 0, max];
+  ticks.forEach(v => {
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, g);
+    // kleine Werte (z.B. δ ≈ 0,0004) in Exponentialschreibweise, sonst stünde überall "0.0"
+    const lab = o.unsigned ? String(v).replace(".", ",") : v === 0 ? "0" : Math.abs(v) >= 0.1 ? fmt(v, 1) : (v < 0 ? MINUS : "") + fmtE(Math.abs(v));
+    const t = svgEl("text", { x: m.l - 5, y: Y(v) + 3.5, "text-anchor": "end" }, svg); t.textContent = lab;
+  });
+  if (o.refLine != null) svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(o.refLine), y2: Y(o.refLine), stroke: rgb(C["ink-3"]), "stroke-dasharray": "3 3" }, svg);
+  vals.forEach((v, i) => {
+    const x = m.l + i * bw + bw * 0.15, y0 = Y(0), y1 = Y(v);
+    const fill = o.color ? o.color(v, i) : rgb(v >= 0 ? C.pos : C.neg);
+    const r = svgEl("rect", { x, y: Math.min(y0, y1), width: bw * 0.7, height: Math.max(1, Math.abs(y1 - y0)), fill, rx: 1.5 }, svg);
+    if (o.highlight === i) { r.setAttribute("stroke", rgb(C.focus)); r.setAttribute("stroke-width", 2); }
+    if (o.dim && o.dim(i)) r.setAttribute("opacity", 0.45);
+    if (o.tip) r.setAttribute("data-tip", o.tip(v, i));
+    const t = svgEl("text", { x: x + bw * 0.35, y: H - m.b + 14, "text-anchor": "middle" }, svg); t.textContent = o.labels ? o.labels[i] : i;
+  });
+}
+
+/* =========================================================================================
+   3. Zustand und Kapitel
+   ========================================================================================= */
+
+const S = {
+  x: bitsOf(0),           // aktuelle Eingabe (darf auch Zwischenwerte enthalten)
+  mode: "gewicht",        // Kantenansicht im Netzgraph
+  step: 1,                // Rechenweg: 0..5
+  sel: { layer: 0, k: 0 },// gewähltes Neuron (layer 0 = Hidden, 1 = Ausgabe)
+};
+/** Ziffer, falls die Eingabe exakt ein 4-Bit-Muster ist, sonst null. */
+function currentDigit() {
+  if (!S.x.every(v => v === 0 || v === 1)) return null;
+  return S.x[0] * 8 + S.x[1] * 4 + S.x[2] * 2 + S.x[3];
+}
+/** Sollwert für die aktuelle Eingabe (nur für 0–9 vorhanden). */
+function currentTarget() { const d = currentDigit(); return d != null && d < 10 ? TARGETS[d] : null; }
+
+/* ---------- Kopf ---------- */
+function renderFacts() {
+  const tr = SEVEN.training;
+  const preds = ALL16.slice(0, 10).map(x => forward(NET, x).A[2]);
+  const bitsOk = preds.reduce((s, p, d) => s + p.filter((v, i) => (v > 0.5 ? 1 : 0) === TARGETS[d][i]).length, 0);
+  const facts = [
+    ["Struktur", NET.sizes.join("–")],
+    ["Parameter", nParams(NET)],
+    ["Bits richtig", `${bitsOk}/70`],
+    ["Epochen", tr.epochs.toLocaleString("de-AT")],
+    ["Lernrate α", String(tr.learning_rate).replace(".", ",")],
+    ["Kosten J", tr.kosten_final.toExponential(2).replace(".", ",")],
+  ];
+  $("#facts").replaceChildren(...facts.map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, String(v)))));
+  $("#footer-gen").textContent = `Daten exportiert am ${D.erzeugt}. Trainiert mit Seed ${tr.seed} in ${tr.dauer_s.toFixed(1).replace(".", ",")} s (Python, eigene Implementierung).`;
+}
+
+/* ---------- Werkbank ---------- */
+const benchGraph = makeGraph($("#bench-graph"), NET.sizes, {
+  inLabels: ["x₀ · 8", "x₁ · 4", "x₂ · 2", "x₃ · 1"], outLabels: SEG.map(s => `Segment ${s}`),
+  inNames: ["x₀ (8er-Bit)", "x₁ (4er-Bit)", "x₂ (2er-Bit)", "x₃ (1er-Bit)"], outNames: SEG.map(s => `Segment ${s}`),
+  onSelect: (layer, k) => select(layer, k, true), selectHint: "im Neuron-Inspektor zeigen",
+});
+const benchDisplay = sevenSeg($("#bench-display"));
+
+function buildInputs() {
+  // Dieselben 16 Knöpfe zweimal: groß in der Werkbank, klein in der Eingabe-Leiste von "So rechnet es"
+  for (const pad of [$("#digit-pad"), $("#inbar-pad")]) {
+    for (let d = 0; d < 16; d++) {
+      pad.append(h("button", {
+        type: "button", "data-d": d, class: d >= 10 ? "untrained" : "", "aria-pressed": "false",
+        title: d >= 10 ? `${d} = ${bitsOf(d).join("")}: nicht trainiert` : `Ziffer ${d} = ${bitsOf(d).join("")}`,
+        onclick: () => { S.x = bitsOf(d); update(); },
+      }, d < 10 ? String(d) : d.toString(16).toUpperCase()));
+    }
+  }
+  // Pro Bit ein Schalter (immer sichtbar) und ein Feinregler 0..1 (aufklappbar unter "Feinregler")
+  ["8er", "4er", "2er", "1er"].forEach((name, i) => {
+    const sw = h("button", { type: "button", class: "switch", role: "switch", "aria-checked": "false", "aria-label": `Bit x${i} (${name})`, id: `sw-${i}`,
+      onclick: () => { S.x[i] = S.x[i] > 0.5 ? 0 : 1; update(); } });
+    const range = h("input", { type: "range", min: "0", max: "1", step: "0.01", value: "0", id: `rg-${i}`, "aria-label": `Wert von x${i}`,
+      oninput: e => { S.x[i] = Number(e.target.value); update(); } });
+    const lbl = () => [h("b", {}, `x${SUB(i)}`), ` ${name}`];
+    $("#bits").append(h("div", { class: "bit-row" }, h("label", {}, ...lbl()), sw, h("output", { id: `out-${i}` }, "0.00")));
+    $("#fine").append(h("div", { class: "bit-row fein" }, h("label", { for: `rg-${i}` }, ...lbl()), range));
+  });
+  $("#noise-btn").addEventListener("click", () => {
+    // Rauschen um das nächste gültige Bitmuster herum, σ = 0,2 -- wie stabil ist die Ausgabe?
+    const r = rng((Date.now() & 0xffff) + 7);
+    S.x = S.x.map(v => clamp01(Math.round(v) + r.n() * 0.2));
+    update();
+  });
+  $("#snap-btn").addEventListener("click", () => { S.x = S.x.map(v => (v > 0.5 ? 1 : 0)); update(); });
+  $("#mode-ctl").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || b.disabled) return;
+    S.mode = b.dataset.mode; update();
+  });
+}
+
+function renderBench(tr) {
+  const d = currentDigit();
+  document.querySelectorAll("#digit-pad button, #inbar-pad button").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.d) === d)));
+  S.x.forEach((v, i) => {
+    $(`#sw-${i}`).setAttribute("aria-checked", String(v > 0.5));
+    $(`#rg-${i}`).value = v;
+    $(`#out-${i}`).textContent = v.toFixed(2);
+  });
+  const target = currentTarget();
+  const grad = target ? backprop(NET, S.x, target) : null;
+  // Gradient-Ansicht braucht einen Sollwert; ohne fällt sie auf "Gewicht" zurück
+  if (S.mode === "gradient" && !grad) S.mode = "gewicht";
+  document.querySelectorAll("#mode-ctl button").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.mode === S.mode));
+    if (b.dataset.mode === "gradient") { b.disabled = !grad; b.title = grad ? "" : "Nur für die Ziffern 0–9 (es braucht einen Sollwert)"; }
+  });
+  benchGraph.update(NET, tr, { mode: S.mode, sel: S.sel, grad });
+  graphLegend($("#bench-legend"), S.mode);
+
+  const out = tr.A[2];
+  benchDisplay(out);
+  $("#display-cap").textContent = `Eingabe ${S.x.map(v => (Number.isInteger(v) ? v : v.toFixed(2))).join(" ")}`;
+
+  $("#out-bars").replaceChildren(...out.map((v, i) => h("div", { class: "bar-row", "data-tip": `Segment ${SEG[i]}: ${fmt(v, 5)}${target ? `\nSoll: ${target[i]}` : ""}` },
+    h("span", {}, SEG[i]),
+    h("div", { class: "bar-track" },
+      h("div", { class: "bar-fill", style: `width:${(v * 100).toFixed(1)}%; opacity:${0.35 + 0.65 * v}` }),
+      h("div", { class: "bar-thresh" }),
+      target ? h("div", { class: "bar-target", style: `left:${target[i] * 100}%` }) : null),
+    h("span", { class: "v" }, fmt(v, 3)))));
+
+  const rec = decode(out), cert = certainty(out);
+  $("#inbar-out").textContent = `x = [${S.x.map(v => (Number.isInteger(v) ? v : v.toFixed(2))).join(" ")}] → ${rec >= 0 ? `zeigt ${rec}` : "kein Ziffernmuster"}`;
+  const v = $("#verdict");
+  let status;
+  if (d != null && d >= 10) status = h("span", { class: "pill warn" }, "nicht trainiert");
+  else if (target) status = rec === d ? h("span", { class: "pill ok" }, "richtig") : h("span", { class: "pill bad" }, "falsch");
+  else status = h("span", { class: "pill neutral" }, "Zwischenwerte");
+  v.replaceChildren(
+    h("div", { class: "big" }, rec >= 0 ? `Anzeige zeigt: ${rec}` : "Kein gültiges Ziffernmuster"),
+    h("div", {}, status, " ", h("span", { class: "small muted" }, `Sicherheit ${(cert * 100).toFixed(1).replace(".", ",")} %`)),
+    h("p", { class: "small muted" }, d != null && d >= 10
+      ? `${d} wurde nie trainiert, das Netz rät.`
+      : "Sicherheit = Abstand des unsichersten Segments zu 0,5."));
+}
+
+/* ---------- Auswahl eines Neurons ---------- */
+function select(layer, k, scroll = false) {
+  S.sel = { layer, k };
+  update();
+  if (scroll) goTo("neuron");   // Klick im Netzgraph der Werkbank öffnet den Neuron-Inspektor
+}
+const neuronName = (layer, k) => (layer === 0 ? `Hidden-Neuron h${k}` : `Ausgabe-Neuron für Segment ${SEG[k]}`);
+
+/* ---------- Rechenweg ---------- */
+const STEPS = [
+  { short: "X", title: "Eingabe X = A[0]" },
+  { short: "Z[1] = W[1]·X + b[1]", title: "Gewichtete Summe der Hidden-Schicht" },
+  { short: "A[1] = σ(Z[1])", title: "Aktivierung der Hidden-Schicht" },
+  { short: "Z[2] = W[2]·A[1] + b[2]", title: "Gewichtete Summe der Ausgabeschicht" },
+  { short: "A[2] = σ(Z[2])", title: "Aktivierung der Ausgabeschicht = Ŷ" },
+  { short: "Ŷ > 0,5", title: "Schwellwert: welche Segmente leuchten" },
+];
+const stepGraph = makeGraph($("#step-graph"), NET.sizes, {
+  inLabels: ["8", "4", "2", "1"], outLabels: SEG, height: 480, padX: 40,
+  onSelect: (layer, k) => { S.sel = { layer, k }; S.step = layer === 0 ? Math.max(1, Math.min(S.step, 2)) : Math.max(3, S.step); update(); },
+});
+function buildSteps() {
+  $("#steps").replaceChildren(...STEPS.map((s, i) => h("li", {}, h("button", { type: "button", "data-s": i, onclick: () => { S.step = i; update(); } }, s.short))));
+  $("#step-prev").addEventListener("click", () => { S.step = Math.max(0, S.step - 1); update(); });
+  $("#step-next").addEventListener("click", () => { S.step = Math.min(5, S.step + 1); update(); });
+  let timer = null;
+  $("#step-play").addEventListener("click", e => {
+    if (timer) { clearInterval(timer); timer = null; e.target.textContent = "Abspielen"; return; }
+    S.step = 0; update(); e.target.textContent = "Anhalten";
+    timer = setInterval(() => {
+      if (S.step >= 5) { clearInterval(timer); timer = null; e.target.textContent = "Abspielen"; return; }
+      S.step++; update();
+    }, 1400);
+  });
+}
+
+/**
+ * Matrix-Vektor-Produkt als Tabelle: oben die Eingabe als Zeile über den Spalten,
+ * darunter pro Neuron: Gewichte | + b | = z. Zeile anklicken wählt das Neuron.
+ */
+function matTable(layer, tr) {
+  const L = NET.layers[layer], x = tr.A[layer], z = tr.Z[layer];
+  const maxW = Math.max(...L.W.flat().map(Math.abs)), maxZ = Math.max(...z.map(Math.abs));
+  const rowName = k => (layer === 0 ? `h${k}` : SEG[k]);
+  const head = h("tr", { class: "xrow" }, h("th", {}, layer === 0 ? "X →" : "A[1] →"),
+    ...x.map((v, j) => h("td", { "data-tip": `${layer === 0 ? `x${SUB(j)}` : `h${j}`} = ${fmt(v, 5)}` }, fmt(v, 2))), h("td", { class: "op" }), h("th", {}, "b"), h("td", { class: "op" }), h("th", {}, "z"));
+  const rows = L.W.map((row, k) => {
+    const sel = S.sel.layer === layer && S.sel.k === k;
+    const tr_ = h("tr", { class: `row${sel ? " sel" : ""}`, onclick: () => { S.sel = { layer, k }; update(); } },
+      h("td", { class: "rowlbl" }, rowName(k)),
+      ...row.map((w, j) => {
+        const fill = divColor(w, maxW);
+        return h("td", { class: "cell", style: `background:${fill};color:${inkOn(fill)}`, "data-tip": `w[${k}][${j}] = ${fmt(w, 5)}\n· ${fmt(x[j], 4)} = ${fmt(w * x[j], 5)}` }, fmt(w, 2));
+      }),
+      h("td", { class: "op" }, "+"),
+      (() => { const f = divColor(L.b[k], maxW); return h("td", { class: "cell", style: `background:${f};color:${inkOn(f)}` }, fmt(L.b[k], 2)); })(),
+      h("td", { class: "op" }, "="),
+      (() => { const f = divColor(z[k], maxZ, C.sunk); return h("td", { class: "cell", style: `background:${f};color:${inkOn(f)};font-weight:600` }, fmt(z[k], 2)); })());
+    return tr_;
+  });
+  return h("div", { class: "scroll-x" }, h("table", { class: "mat" }, h("tbody", {}, head, ...rows)));
+}
+/** Ausgeschriebene Summe für das gewählte Neuron. */
+function sumFormula(layer, k, tr) {
+  const L = NET.layers[layer], x = tr.A[layer], z = tr.Z[layer][k];
+  const src = j => (layer === 0 ? `x${SUB(j)}` : `h${j}`);
+  const terms = L.W[k].map((w, j) => `(${fmt(w, 3)})·${fmt(x[j], 3)}`);
+  const lines = [];
+  for (let i = 0; i < terms.length; i += 4) lines.push(terms.slice(i, i + 4).join(" + "));
+  const name = layer === 0 ? `z${SUB(k)}` : `z_${SEG[k]}`;
+  return h("div", { class: "formula", html:
+    `${name} = Σ w·${layer === 0 ? "x" : "a"} + b = ${L.W[k].map((_, j) => `w${SUB(j)}·${src(j)}`).slice(0, 3).join(" + ")} + … + b<br>` +
+    `&nbsp;&nbsp;&nbsp;= ${lines.join("<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ ")}<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ (${fmt(L.b[k], 3)})` +
+    `<br>&nbsp;&nbsp;&nbsp;= <span class="hl">${fmt(z, 4)}</span>` });
+}
+function sigmoidFormula(layer, k, tr) {
+  const z = tr.Z[layer][k], a = tr.A[layer + 1][k];
+  const n = layer === 0 ? SUB(k) : "_" + SEG[k];
+  return h("div", { class: "formula", html:
+    `a${n} = σ(z${n}) = 1 / (1 + e<sup>${MINUS}z</sup>) = 1 / (1 + e<sup>${fmt(-z, 3)}</sup>)<br>` +
+    `&nbsp;&nbsp;&nbsp;= 1 / (1 + ${fmt(Math.exp(-z), 4)}) = <span class="hl">${fmt(a, 5)}</span>` });
+}
+/** Zwei Spalten z -> a als kompakte Tabelle. */
+function actTable(layer, tr) {
+  const z = tr.Z[layer], a = tr.A[layer + 1], maxZ = Math.max(...z.map(Math.abs));
+  const name = k => (layer === 0 ? `h${k}` : SEG[k]);
+  const rows = z.map((zv, k) => {
+    const fz = divColor(zv, maxZ, C.sunk), fa = actColor(a[k]);
+    return h("tr", { class: `row${S.sel.layer === layer && S.sel.k === k ? " sel" : ""}`, onclick: () => { S.sel = { layer, k }; update(); } },
+      h("td", { class: "rowlbl" }, name(k)),
+      h("td", { class: "cell", style: `background:${fz};color:${inkOn(fz)}` }, fmt(zv, 3)),
+      h("td", { class: "op" }, "σ →"),
+      h("td", { class: "cell", style: `background:${fa};color:${inkOn(fa)};font-weight:600` }, fmt(a[k], 4)));
+  });
+  const half = Math.ceil(rows.length / 2);
+  const tbl = rs => h("table", { class: "mat" }, h("tbody", {}, h("tr", {}, h("th", {}), h("th", {}, "z"), h("th", {}), h("th", {}, "a = σ(z)")), ...rs));
+  return h("div", { style: "display:flex; flex-wrap:wrap; gap:8px 24px" }, tbl(rows.slice(0, half)), rows.length > half ? tbl(rows.slice(half)) : null);
+}
+
+function renderStep(tr) {
+  document.querySelectorAll("#steps button").forEach(b => b.setAttribute("aria-current", Number(b.dataset.s) === S.step ? "step" : "false"));
+  $("#step-prev").disabled = S.step === 0;
+  $("#step-next").disabled = S.step === 5;
+  // Im Rechenweg ist immer ein Neuron der gerade berechneten Schicht gewählt
+  const layerOfStep = S.step <= 2 ? 0 : 1;
+  const sel = S.sel.layer === layerOfStep ? S.sel : { layer: layerOfStep, k: 0 };
+  stepGraph.update(NET, tr, { mode: "signal", stage: S.step, sel: S.step === 0 ? null : sel });
+
+  const body = $("#step-body");
+  const st = STEPS[S.step];
+  const d = currentDigit();
+  const parts = [h("p", { class: "eyebrow" }, `Schritt ${S.step + 1} von 6`), h("h3", {}, st.title)];
+  if (S.step === 0) {
+    parts.push(
+      h("p", {}, d != null ? `${d} als 4 Bit: ${d} = ${bitsOf(d).map((b, i) => `${b}·${[8, 4, 2, 1][i]}`).join(" + ")}.`
+        : "Zwischenwerte, das Netz rechnet damit wie mit Bits."),
+      h("div", { class: "formula", html: `X = A[0] = [ ${S.x.map(v => fmt(v, 2)).join(", ")} ]ᵀ` }),
+      h("p", { class: "muted small" }, "Die Eingabeschicht hat keine Gewichte, sie reicht die Werte nur weiter."));
+  } else if (S.step === 1 || S.step === 3) {
+    const layer = S.step === 1 ? 0 : 1;
+    parts.push(
+      h("p", {}, layer === 0
+        ? "Gewichtete Summe der 4 Eingänge plus Bias, eine Zeile pro Neuron."
+        : "Dasselbe für die Segmente: gewichtete Summe der 16 Hidden-Werte."),
+      matTable(layer, tr),
+      h("p", { class: "small muted" }, `Ausgeschrieben für ${neuronName(layer, sel.k)}:`),
+      sumFormula(layer, sel.k, tr));
+  } else if (S.step === 2 || S.step === 4) {
+    const layer = S.step === 2 ? 0 : 1;
+    parts.push(
+      h("p", {}, "σ drückt jedes z zwischen 0 und 1. Ohne diese Krümmung wäre das ganze Netz nur eine lineare Funktion."),
+      actTable(layer, tr),
+      sigmoidFormula(layer, sel.k, tr));
+  } else {
+    const out = tr.A[2], target = currentTarget(), rec = decode(out);
+    parts.push(
+      h("p", {}, "Ausgabe über 0,5 = Segment an."),
+      h("div", { class: "scroll-x" }, h("table", { class: "data" },
+        h("thead", {}, h("tr", {}, h("th", {}, "Segment"), h("th", { class: "r" }, "a"), h("th", { class: "r" }, "> 0,5"), h("th", { class: "r" }, "Soll"))),
+        h("tbody", {}, ...out.map((v, i) => h("tr", {},
+          h("td", {}, SEG[i]), h("td", { class: "num r" }, fmt(v, 4)), h("td", { class: "num r" }, v > 0.5 ? "1" : "0"),
+          h("td", { class: "num r" }, target ? (target[i] === (v > 0.5 ? 1 : 0) ? `${target[i]} ✓` : `${target[i]} ✗`) : "–")))))),
+      h("p", {}, rec >= 0 ? `Das Muster ergibt die Ziffer ${rec}.` : "Das Muster entspricht keiner Ziffer."));
+  }
+  body.replaceChildren(...parts);
+}
+
+/* ---------- Neuron-Inspektor ---------- */
+function buildInspector() {
+  const sel = $("#insp-select");
+  NET.layers.forEach((L, layer) => {
+    const og = h("optgroup", { label: layer === 0 ? "Hidden-Schicht" : "Ausgabeschicht" });
+    L.W.forEach((_, k) => og.append(h("option", { value: `${layer}:${k}` }, layer === 0 ? `h${k}` : `Segment ${SEG[k]}`)));
+    sel.append(og);
+  });
+  sel.addEventListener("change", e => { const [l, k] = e.target.value.split(":").map(Number); select(l, k); });
+}
+function renderInspector(tr) {
+  const { layer, k } = S.sel, L = NET.layers[layer];
+  const z = tr.Z[layer][k], a = tr.A[layer + 1][k], slope = a * (1 - a);
+  $("#insp-select").value = `${layer}:${k}`;
+  $("#insp-title").textContent = neuronName(layer, k);
+  const kv = [
+    ["Eingänge", layer === 0 ? "x₀ … x₃ (4 Bits)" : "h0 … h15 (16 Hidden-Werte)"],
+    ["Bias b", fmt(L.b[k], 5)],
+    ["z = w·x + b", fmt(z, 5)],
+    ["a = σ(z)", fmt(a, 5)],
+    ["σ′(z) = a(1−a)", fmt(slope, 5)],
+  ];
+  $("#insp-kv").replaceChildren(...kv.flatMap(([kk, v]) => [h("dt", {}, kk), h("dd", {}, v)]));
+
+  // Sigmoid-Kurve mit aktuellem Punkt und Tangente
+  const svg = $("#insp-sigmoid"); svg.innerHTML = "";
+  const W = 300, H = 190, m = { l: 30, r: 10, t: 10, b: 24 }, zr = 10;
+  const X = v => m.l + (v + zr) / (2 * zr) * (W - m.l - m.r), Y = v => m.t + (1 - v) * (H - m.t - m.b);
+  const g = svgEl("g", { class: "grid" }, svg);
+  [0, 0.5, 1].forEach(v => { svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, g); const t = svgEl("text", { x: m.l - 6, y: Y(v) + 3.5, "text-anchor": "end" }, svg); t.textContent = String(v).replace(".", ","); });
+  [-10, -5, 0, 5, 10].forEach(v => { svgEl("line", { x1: X(v), x2: X(v), y1: m.t, y2: H - m.b }, g); const t = svgEl("text", { x: X(v), y: H - 8, "text-anchor": "middle" }, svg); t.textContent = v === 0 ? "z = 0" : fmt(v, 0); });
+  const pts = []; for (let v = -zr; v <= zr; v += 0.25) pts.push(`${X(v).toFixed(1)},${Y(ACT.sigmoid(v)).toFixed(1)}`);
+  svgEl("polyline", { points: pts.join(" "), fill: "none", stroke: rgb(C["ink-2"]), "stroke-width": 2 }, svg);
+  const zc = Math.max(-zr, Math.min(zr, z));
+  const tl = 2.2; // Tangente: a + σ'(z)·(v − z)
+  svgEl("line", { x1: X(zc - tl), y1: Y(a - slope * tl), x2: X(zc + tl), y2: Y(a + slope * tl), stroke: rgb(C.focus), "stroke-width": 1.5, "stroke-dasharray": "4 3" }, svg);
+  svgEl("line", { x1: X(zc), x2: X(zc), y1: Y(a), y2: H - m.b, stroke: rgb(C.led), "stroke-width": 1, "stroke-dasharray": "2 3" }, svg);
+  svgEl("circle", { cx: X(zc), cy: Y(a), r: 6, fill: rgb(C.led), stroke: rgb(C.panel), "stroke-width": 2, "data-tip": `z = ${fmt(z, 4)}\na = ${fmt(a, 5)}\nSteigung σ′(z) = ${fmt(slope, 5)}` }, svg);
+  if (Math.abs(z) > zr) { const t = svgEl("text", { x: X(zc) + (z > 0 ? -6 : 6), y: Y(a) + (a > 0.5 ? 16 : -10), "text-anchor": z > 0 ? "end" : "start" }, svg); t.textContent = `z = ${fmt(z, 1)} (außerhalb)`; }
+
+  // Eingehende Gewichte (+ Bias)
+  const inVals = [...L.W[k], L.b[k]];
+  const inLabels = layer === 0 ? ["x₀", "x₁", "x₂", "x₃", "b"] : [...L.W[k].map((_, j) => j), "b"];
+  $("#insp-in-sub").textContent = layer === 0 ? "Gewicht pro Eingangsbit, rechts der Bias" : "Gewicht pro Hidden-Neuron, rechts der Bias";
+  barChart($("#insp-in"), inVals, {
+    labels: inLabels, max: Math.max(...NET.layers[layer].W.flat().map(Math.abs), ...NET.layers[layer].b.map(Math.abs)),
+    tip: (v, i) => i === inVals.length - 1 ? `Bias b = ${fmt(v, 4)}` : `w${SUB(i)} = ${fmt(v, 4)}\nEingang = ${fmt(tr.A[layer][i], 4)}\nBeitrag w·x = ${fmt(v * tr.A[layer][i], 4)}`,
+  });
+  // Ausgehend (nur Hidden) bzw. Beiträge (Ausgabe)
+  if (layer === 0) {
+    $("#insp-out-title").textContent = "Ausgehende Gewichte";
+    $("#insp-out-sub").textContent = "Wie stark h" + k + " jedes Segment an- oder abschaltet";
+    const outW = NET.layers[1].W.map(row => row[k]);
+    barChart($("#insp-out"), outW, { labels: SEG, max: Math.max(...NET.layers[1].W.flat().map(Math.abs)), tip: (v, i) => `h${k} → ${SEG[i]}: w = ${fmt(v, 4)}\nmit a = ${fmt(a, 3)} fließt ${fmt(v * a, 4)}` });
+  } else {
+    $("#insp-out-title").textContent = "Was gerade ankommt";
+    $("#insp-out-sub").textContent = "Beitrag w·a jedes Hidden-Neurons zu z für die aktuelle Eingabe";
+    const contrib = L.W[k].map((w, j) => w * tr.A[1][j]);
+    barChart($("#insp-out"), contrib, { labels: contrib.map((_, j) => j), tip: (v, j) => `h${j}: w·a = ${fmt(L.W[k][j], 3)} · ${fmt(tr.A[1][j], 3)} = ${fmt(v, 4)}` });
+  }
+  // Antwort auf alle 16 Eingaben
+  const resp = ALL16.map(x => forward(NET, x).A[layer + 1][k]);
+  const d = currentDigit();
+  barChart($("#insp-resp"), resp, {
+    unsigned: true, max: 1, refLine: 0.5, labels: resp.map((_, i) => (i < 10 ? i : i.toString(16).toUpperCase())),
+    color: v => actColor(0.15 + 0.85 * v), dim: i => i >= 10, highlight: d,
+    tip: (v, i) => `Eingabe ${i} = ${bitsOf(i).join("")}\na = ${fmt(v, 4)}${i >= 10 ? "\n(nicht trainiert)" : ""}`,
+  });
+  const on = resp.slice(0, 10).map((v, i) => (v > 0.5 ? i : null)).filter(v => v != null);
+  $("#insp-resp-note").textContent = layer === 0
+    ? (on.length ? `h${k} ist aktiv bei: ${on.join(", ")}.` : `h${k} ist bei keiner Ziffer über 0,5.`)
+    : `Soll leuchten bei: ${TARGETS.map((t, i) => (t[k] ? i : null)).filter(v => v != null).join(", ")}. Grau: nie trainiert.`;
+}
+
+/* ---------- Gewichtsmatrizen ---------- */
+function renderMatrices() {
+  [0, 1].forEach(layer => {
+    const L = NET.layers[layer];
+    const M = L.W.map((row, k) => [...row, L.b[k]]);
+    const max = Math.max(...M.flat().map(Math.abs));
+    const cols = M[0].length;
+    heatmap($(layer === 0 ? "#heat-w1" : "#heat-w2"), M, {
+      cell: layer === 0 ? 34 : 26, labelW: layer === 0 ? 34 : 24,
+      rowLabels: layer === 0 ? L.W.map((_, k) => `h${k}`) : SEG,
+      colLabels: [...(layer === 0 ? ["x₀", "x₁", "x₂", "x₃"] : L.W[0].map((_, j) => `h${j}`)), "b"],
+      gapAfterCol: cols - 2,
+      color: v => divColor(v, max),
+      showVals: v => (Math.abs(v) >= 10 ? fmt(v, 0) : fmt(v, 1)),
+      tip: (v, i, j) => j === cols - 1 ? `${layer === 0 ? `h${i}` : `Segment ${SEG[i]}`}: Bias = ${fmt(v, 5)}`
+        : `${layer === 0 ? `x${SUB(j)} → h${i}` : `h${j} → Segment ${SEG[i]}`}\nw = ${fmt(v, 5)}`,
+      onClick: i => select(layer, i, true),
+      extra: (i, j, x, y, s, svg) => { if (j === 0 && S.sel.layer === layer && S.sel.k === i) svgEl("rect", { x: x - 2, y: y - 2, width: cols * (s + 2) + 8 + 2, height: s + 4, fill: "none", stroke: rgb(C.focus), "stroke-width": 2, rx: 3, "pointer-events": "none" }, svg); },
+    });
+    scaleBar($(layer === 0 ? "#scale-w1" : "#scale-w2"), max, "Gewicht");
+  });
+}
+
+/* ---------- Alle Ziffern ---------- */
+const stripDisplays = [];
+function buildStrip() {
+  const strip = $("#digit-strip");
+  for (let d = 0; d < 16; d++) {
+    const svg = svgEl("svg", {});
+    const tile = h("button", { type: "button", class: `digit-tile${d >= 10 ? " untrained" : ""}`, "data-d": d, "aria-label": `Eingabe ${d} wählen`,
+      onclick: () => { S.x = bitsOf(d); update(); scrollTo({ top: 0, behavior: "smooth" }); } }, svg, h("div", { class: "cap" }));
+    strip.append(tile);
+    stripDisplays.push({ tile, upd: sevenSeg(svg) });
+  }
+}
+function renderAllDigits() {
+  const preds = ALL16.map(x => forward(NET, x));
+  let bitsOk = 0, digitsOk = 0, minMargin = 1;
+  const cur = currentDigit();
+  stripDisplays.forEach(({ tile, upd }, d) => {
+    const out = preds[d].A[2];
+    upd(out);
+    tile.classList.toggle("cur", d === cur);
+    const rec = decode(out);
+    let cap;
+    if (d < 10) {
+      const ok = out.every((v, i) => (v > 0.5 ? 1 : 0) === TARGETS[d][i]);
+      bitsOk += out.filter((v, i) => (v > 0.5 ? 1 : 0) === TARGETS[d][i]).length;
+      digitsOk += ok; minMargin = Math.min(minMargin, certainty(out));
+      cap = `<b>${d}</b> ${bitsOf(d).join("")}<br>${ok ? "✓ richtig" : "✗ falsch"}`;
+    } else {
+      cap = `<b>${d}</b> ${bitsOf(d).join("")}<br>${rec >= 0 ? `zeigt ${rec}` : "kein Muster"}`;
+    }
+    tile.querySelector(".cap").innerHTML = cap;
+  });
+  $("#strip-summary").textContent = `${bitsOk}/70 Segmente, ${digitsOk}/10 Ziffern richtig, kleinste Sicherheit ${(minMargin * 100).toFixed(1).replace(".", ",")} %. ` +
+    "10–15 (gestrichelt): nie trainiert.";
+
+  const hid = preds.map(p => p.A[1]);
+  heatmap($("#heat-hidden"), hid, {
+    cell: 24, labelW: 40, rowLabels: ALL16.map((_, d) => (d < 10 ? `${d}` : `${d}*`)), colLabels: hid[0].map((_, j) => `h${j}`),
+    color: v => actColor(v), showVals: v => (v > 0.995 ? "1" : v < 0.005 ? "0" : fmt(v, 2).replace(/^0/, "")),
+    tip: (v, i, j) => `Eingabe ${i} (${bitsOf(i).join("")})${i >= 10 ? ", nicht trainiert" : ""}\nh${j}: a = ${fmt(v, 4)}`,
+    onClick: (i, j) => { S.x = bitsOf(i); select(0, j); },
+    extra: (i, j, x, y, s, svg) => { if (i === cur && j === 0) svgEl("rect", { x: x - 2, y: y - 2, width: hid[0].length * (s + 2) + 2, height: s + 4, fill: "none", stroke: rgb(C.led), "stroke-width": 2, rx: 3, "pointer-events": "none" }, svg); },
+  });
+  const outs = preds.slice(0, 10).map(p => p.A[2]);
+  heatmap($("#heat-out"), outs, {
+    cell: 34, labelW: 26, rowLabels: outs.map((_, d) => String(d)), colLabels: SEG,
+    color: v => actColor(v), showVals: v => fmt(v, 2).replace(/^0/, ""),
+    tip: (v, i, j) => `Ziffer ${i}, Segment ${SEG[j]}\nAusgabe ${fmt(v, 5)}\nSoll ${TARGETS[i][j]}`,
+    onClick: (i, j) => { S.x = bitsOf(i); select(1, j); },
+    extra: (i, j, x, y, s, svg) => {
+      if (TARGETS[i][j]) svgEl("circle", { cx: x + s - 5, cy: y + 5, r: 2.5, fill: rgb(C.ink), stroke: rgb(C.panel), "stroke-width": 1, "pointer-events": "none" }, svg);
+      if ((outs[i][j] > 0.5 ? 1 : 0) !== TARGETS[i][j]) svgEl("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, fill: "none", stroke: rgb(C.bad), "stroke-width": 2.5, "pointer-events": "none" }, svg);
+    },
+  });
+}
+
+/* ---------- Backpropagation ---------- */
+const BP = { lr: 0.1, sandbox: null, steps: 0 };
+function renderBackprop() {
+  const root = $("#bp-root");
+  const target = currentTarget(), d = currentDigit();
+  if (!target) {
+    root.replaceChildren(h("p", { class: "empty-msg" }, d != null
+      ? `${d} hat keinen Sollwert. Oben eine Ziffer 0–9 wählen.`
+      : "Zwischenwerte haben keinen Sollwert. Ziffer 0–9 wählen oder „Auf 0/1 runden“."));
+    return;
+  }
+  const g = backprop(NET, S.x, target);
+  const out = g.t.A[2];
+
+  // Tabelle der Ausgabeschicht: A, Y, A−Y, σ′, δ
+  const tbl = h("table", { class: "data" },
+    h("thead", {}, h("tr", {}, ...["Segment", "A[2]", "Y", "A − Y", "A(1 − A)", "δ[2] = (A−Y)·A(1−A)"].map((t, i) => h("th", { class: i ? "r" : "" }, t)))),
+    h("tbody", {}, ...out.map((a, i) => h("tr", {},
+      h("td", {}, SEG[i]), h("td", { class: "num r" }, fmt(a, 5)), h("td", { class: "num r" }, String(target[i])),
+      h("td", { class: "num r" }, fmt(a - target[i], 5)), h("td", { class: "num r" }, fmt(a * (1 - a), 5)),
+      h("td", { class: "num r", style: `color:${rgb(g.delta[1][i] >= 0 ? C.pos : C.neg)}` }, fmt(g.delta[1][i], 6))))));
+
+  const deltaSvg = svgEl("svg", { class: "chart", viewBox: "0 0 520 170" });
+  const gw1 = svgEl("svg", { class: "heat" }), gw2 = svgEl("svg", { class: "heat" });
+  const sim = h("div", { id: "bp-sim" });
+
+  root.replaceChildren(
+    h("div", { class: "grid-2" },
+      h("div", { class: "card" },
+        h("h3", {}, `1 · Fehler an der Ausgabe für die Ziffer ${d}`),
+        h("p", { class: "sub" }, `Kosten J = ½·Σ(A − Y)² = ${g.J.toExponential(3).replace(".", ",")}`),
+        h("div", { class: "formula", html: "∂J/∂A[2] = A[2] − Y&nbsp;&nbsp;&nbsp;∂A[2]/∂Z[2] = A[2]·(1 − A[2])<br>δ[2] = ∂J/∂Z[2] = (A[2] − Y) · A[2]·(1 − A[2])" }),
+        h("div", { class: "scroll-x", style: "margin-top:12px" }, tbl)),
+      h("div", { class: "card" },
+        h("h3", {}, "2 · Fehler zurück in die Hidden-Schicht"),
+        h("p", { class: "sub" }, "Gewichtet mit den ausgehenden Gewichten"),
+        h("div", { class: "formula", html: "∂J/∂A[1] = W[2]ᵀ · δ[2]&nbsp;&nbsp;&nbsp;(mit den ALTEN Gewichten)<br>δ[1] = (W[2]ᵀ · δ[2]) · A[1]·(1 − A[1])" }),
+        h("div", { style: "margin-top:12px" }, deltaSvg))),
+    h("div", { class: "grid-2", style: "margin-top:16px" },
+      h("div", { class: "card" },
+        h("h3", {}, "3 · Gradienten der Gewichte"),
+        h("p", { class: "sub" }, "∂J/∂W[l] = δ[l] · A[l−1]ᵀ   und   ∂J/∂b[l] = δ[l]"),
+        h("p", { class: "small muted" }, "W[2] (Zeile = Segment, Spalte = h0–h15, letzte Spalte = Bias):"),
+        h("div", { class: "scroll-x" }, gw2),
+        h("p", { class: "small muted", style: "margin-top:10px" }, "W[1] (Zeile = h0–h15, Spalte = x₀–x₃, letzte Spalte = Bias):"),
+        h("div", { class: "scroll-x" }, gw1)),
+      h("div", { class: "card" },
+        h("h3", {}, "4 · Gradientenabstieg ausprobieren"),
+        h("p", { class: "sub" }, "W_neu = W_alt − α · ∂J/∂W, auf einer Kopie des Netzes"),
+        sim)));
+
+  barChart(deltaSvg, g.delta[0], { labels: g.delta[0].map((_, j) => `h${j}`), tip: (v, j) => `δ[1] von h${j} = ${fmt(v, 7)}\na = ${fmt(g.t.A[1][j], 4)}, σ′ = ${fmt(g.t.A[1][j] * (1 - g.t.A[1][j]), 4)}` });
+  const M2 = g.gradW[1].map((row, k) => [...row, g.gradB[1][k]]), M1 = g.gradW[0].map((row, k) => [...row, g.gradB[0][k]]);
+  const max2 = Math.max(...M2.flat().map(Math.abs), 1e-12), max1 = Math.max(...M1.flat().map(Math.abs), 1e-12);
+  // Farbe zeigt die Update-Richtung −∂J/∂w (teal = Gewicht wächst), wie im Netzgraph
+  heatmap(gw2, M2, { cell: 20, labelW: 18, rowLabels: SEG, gapAfterCol: 15, color: v => divColor(-v, max2), tip: (v, i, j) => `${j === 16 ? "Bias" : `h${j} → ${SEG[i]}`}\n∂J/∂w = ${fmt(v, 7)}\nUpdate −α·∂J/∂w = ${fmt(-BP.lr * v, 7)}` });
+  heatmap(gw1, M1, { cell: 20, labelW: 30, rowLabels: M1.map((_, k) => `h${k}`), colLabels: ["x₀", "x₁", "x₂", "x₃", "b"], gapAfterCol: 3, color: v => divColor(-v, max1), tip: (v, i, j) => `${j === 4 ? "Bias" : `x${SUB(j)} → h${i}`}\n∂J/∂w = ${fmt(v, 7)}` });
+  renderSim();
+}
+function renderSim() {
+  const target = currentTarget(); if (!target) return;
+  const d = currentDigit();
+  if (!BP.sandbox || BP.digit !== d) { BP.sandbox = cloneNet(NET); BP.steps = 0; BP.digit = d; }
+  const net = BP.sandbox;
+  const jOf = (n, i) => 0.5 * forward(n, ALL16[i]).A[2].reduce((s, a, k) => s + (a - TARGETS[i][k]) ** 2, 0);
+  const meanJ = n => TARGETS.reduce((s, _, i) => s + jOf(n, i), 0) / 10;
+  const rows = [
+    ["Kosten J dieser Ziffer", jOf(NET, d), jOf(net, d)],
+    ["mittlere Kosten aller 10 Ziffern", meanJ(NET), meanJ(net)],
+  ];
+  const out0 = forward(NET, S.x).A[2], out1 = forward(net, S.x).A[2];
+  const changed = out0.map((v, i) => `${SEG[i]}: ${fmt(v, 5)} → ${fmt(out1[i], 5)}`).join("\n");
+  $("#bp-sim").replaceChildren(
+    h("div", { class: "btn-row", style: "margin-top:0" },
+      h("label", { class: "small muted", style: "display:flex;gap:6px;align-items:center" }, "α",
+        h("select", { id: "bp-lr", onchange: e => { BP.lr = Number(e.target.value); } },
+          ...[0.1, 1, 5, 20].map(v => h("option", { value: v, ...(v === BP.lr ? { selected: "" } : {}) }, String(v).replace(".", ","))))),
+      h("button", { class: "btn primary", type: "button", onclick: () => { sgdStep(net, S.x, target, BP.lr); BP.steps++; renderSim(); } }, "1 Schritt"),
+      h("button", { class: "btn", type: "button", onclick: () => { for (let i = 0; i < 10; i++) sgdStep(net, S.x, target, BP.lr); BP.steps += 10; renderSim(); } }, "10 Schritte"),
+      h("button", { class: "btn", type: "button", onclick: () => { BP.sandbox = cloneNet(NET); BP.steps = 0; renderSim(); } }, "Zurücksetzen")),
+    h("table", { class: "data", style: "margin-top:12px" },
+      h("thead", {}, h("tr", {}, h("th", {}, `nach ${BP.steps} Schritt${BP.steps === 1 ? "" : "en"} nur auf Ziffer ${d}`), h("th", { class: "r" }, "vorher"), h("th", { class: "r" }, "nachher"))),
+      h("tbody", {}, ...rows.map(([n, a, b]) => h("tr", {}, h("td", {}, n), h("td", { class: "num r" }, a.toExponential(3)),
+        h("td", { class: "num r", style: `color:${rgb(b <= a ? C.ok : C.bad)}` }, b.toExponential(3)))))),
+    h("p", { class: "small muted", style: "margin-top:10px", "data-tip": changed },
+      "Viele Schritte auf nur einer Ziffer lassen das Netz die anderen „vergessen“. Deshalb trainiert jede Epoche alle 10."));
+}
+
+/* ---------- Training und TensorFlow ---------- */
+function renderTraining() {
+  const s7 = SEVEN.training, sx = XORD.training;
+  $("#loss-sub").textContent = `Seed ${s7.seed} bzw. ${sx.seed}, Rechenzeit ${s7.dauer_s.toFixed(1).replace(".", ",")} s (7-Segment) und ${sx.dauer_s.toFixed(1).replace(".", ",")} s (XOR)`;
+  const c7 = rgb(C.led), cx = rgb(C.pos);
+  logChart($("#loss-own"), [
+    { name: "7-Segment 4-16-7", data: s7.kosten, step: s7.kosten_schritt, color: c7, width: 2.2 },
+    { name: "XOR 2-2-1", data: sx.kosten, step: sx.kosten_schritt, color: cx, width: 2.2 },
+  ], { xMax: s7.epochs, yMin: 1e-4, yMax: 1, refY: 0.01, marks: [{ x: s7.epoche_unter_0_01, color: c7 }, { x: sx.epoche_unter_0_01, color: cx }] });
+  $("#loss-own-legend").replaceChildren(
+    h("span", {}, h("i", { style: `background:${c7}` }), `7-Segment: J < 0,01 ab Epoche ${s7.epoche_unter_0_01}`),
+    h("span", {}, h("i", { style: `background:${cx}` }), `XOR: J < 0,01 ab Epoche ${sx.epoche_unter_0_01}`));
+  const plateau = sx.kosten.findIndex(v => v < 0.12) * sx.kosten_schritt;
+  $("#loss-own-legend").append(h("span", {}, `XOR-Plateau bis Epoche ~${plateau.toLocaleString("de-AT")}: Die Hidden-Neuronen müssen sich erst aufteilen.`));
+
+  const tf = D.tf;
+  if (!tf) {
+    $("#tf-chart-wrap").replaceChildren(h("p", { class: "empty-msg" }, "Keine TensorFlow-Daten. compare_tensorflow.py im TensorFlow-venv ausführen und den Export wiederholen."));
+    $("#tf-table").replaceChildren(h("p", { class: "muted" }, "–"));
+    return;
+  }
+  const ctl = $("#tf-ctl");
+  let which = 1;
+  const draw = () => {
+    ctl.querySelectorAll("button").forEach((b, i) => b.setAttribute("aria-pressed", String(i === which)));
+    const v = tf.vergleiche[which], step = tf.plot_schritt;
+    const cols = [rgb(C.ink), rgb(C.led), rgb(C.neg)];
+    logChart($("#loss-tf"), v.laeufe.map((l, i) => ({
+      name: l.name, data: l.kosten, step, color: cols[i], width: i === 0 ? 5 : 1.8, opacity: i === 0 ? 0.28 : 1, dash: i === 1 ? "5 4" : "",
+    })), { xMax: tf.epochs, yMin: 1e-4, yMax: 1, refY: 0.01 });
+    $("#tf-sub").textContent = `${v.titel}, Netz ${v.layer_sizes.join("–")}. Max. Abweichung eigen ↔ TF identisch: ${fmtE(v.abweichung_eigen_tf_identisch)}`;
+    $("#loss-tf-legend").replaceChildren(
+      h("span", {}, h("i", { style: `background:${cols[0]};opacity:.35;height:5px` }), "eigene Implementierung"),
+      h("span", {}, h("i", { style: `background:${cols[1]}` }), "TF identisch (gleiche Startgewichte, float64)"),
+      h("span", {}, h("i", { style: `background:${cols[2]}` }), "TF Standard (Glorot, Keras-MSE, float32)"));
+  };
+  ctl.replaceChildren(...tf.vergleiche.map((v, i) => h("button", { type: "button", onclick: () => { which = i; draw(); } }, v.layer_sizes.join("–"))));
+  draw();
+
+  const head = ["Netz", "Lauf", "Kosten J", "Bits", "Samples", "Dauer", "J < 0,01 ab Epoche"];
+  const body = tf.vergleiche.flatMap(v => v.laeufe.map((l, i) => h("tr", {},
+    h("td", {}, i === 0 ? v.layer_sizes.join("–") : ""), h("td", {}, l.name),
+    h("td", { class: "num r" }, l.mse.toExponential(2)),
+    h("td", { class: "num r" }, h("span", { class: `pill ${l.bits_ok === l.bits ? "ok" : "bad"}` }, `${l.bits_ok}/${l.bits}`)),
+    h("td", { class: "num r" }, `${l.samples_ok}/${l.samples}`),
+    h("td", { class: "num r" }, `${l.dauer_s.toFixed(1).replace(".", ",")} s`),
+    h("td", { class: "num r" }, l.epoche_unter_ziel == null ? "nie" : l.epoche_unter_ziel.toLocaleString("de-AT")))));
+  $("#tf-table").replaceChildren(
+    h("table", { class: "data" }, h("thead", {}, h("tr", {}, ...head.map((t, i) => h("th", { class: i > 1 ? "r" : "" }, t)))), h("tbody", {}, ...body)),
+    h("p", { class: "note", style: "margin-top:12px" },
+      "TF identisch rechnet bei gleichem Start Epoche für Epoche dasselbe. Damit ist die eigene Backpropagation unabhängig bestätigt. ",
+      "TF Standard lernt langsamer (die Keras-MSE teilt durch die Zahl der Ausgänge) und bleibt bei XOR in einem lokalen Minimum hängen."));
+}
+
+/* ---------- Live-Training ---------- */
+const LIVE = { net: null, seed: 1, epoch: 0, hist: [], running: false, raf: 0, graph: null, displays: [] };
+function liveLr() { return Math.pow(10, Number($("#live-lr").value)); }
+function liveSpeed() { return Math.max(1, Math.round(Math.pow(10, Number($("#live-speed").value)))); }
+function liveReset(newSeed) {
+  if (newSeed) LIVE.seed = (LIVE.seed * 7919 + 13) % 100000;
+  const hidden = Number($("#live-hidden").value);
+  LIVE.net = randomNet([4, hidden, 7], $("#live-init").value, LIVE.seed);
+  LIVE.epoch = 0; LIVE.hist = [];
+  LIVE.graph = makeGraph($("#live-graph"), LIVE.net.sizes, { height: hidden > 16 ? 300 : 230, padX: 26, radius: 7, maxSpacing: 26, colTitles: ["", "", ""] });
+  $("#live-seed").textContent = `Seed ${LIVE.seed}`;
+  liveRender();
+}
+function liveEpoch() {
+  let J = 0;
+  for (let i = 0; i < 10; i++) J += sgdStep(LIVE.net, ALL16[i], TARGETS[i], liveLr());   // feste Reihenfolge wie im Python-Training
+  LIVE.hist.push(J / 10); LIVE.epoch++;
+}
+function liveRender() {
+  const preds = ALL16.slice(0, 10).map(x => forward(LIVE.net, x).A[2]);
+  let bits = 0, digs = 0;
+  preds.forEach((p, d) => { const ok = p.map((v, i) => (v > 0.5 ? 1 : 0) === TARGETS[d][i]); bits += ok.filter(Boolean).length; digs += ok.every(Boolean); });
+  LIVE.displays.forEach((upd, d) => upd(preds[d]));
+  const J = LIVE.hist.length ? LIVE.hist[LIVE.hist.length - 1] : NaN;
+  $("#live-stats").replaceChildren(...[
+    ["Epoche", LIVE.epoch.toLocaleString("de-AT")], ["Kosten J", Number.isNaN(J) ? "–" : J.toExponential(2)],
+    ["Segmente", `${bits}/70`], ["Ziffern", `${digs}/10`], ["Netz", LIVE.net.sizes.join("–")],
+  ].map(([k, v]) => h("div", {}, h("dt", {}, k), h("dd", {}, v))));
+  // x-Achse wächst in runden Stufen mit, damit die Kurve nicht ständig springt
+  const xMax = [500, 1000, 2000, 5000, 10000, 20000, 50000].find(v => v >= LIVE.epoch) || 50000;
+  const stepN = Math.max(1, Math.ceil(LIVE.hist.length / 600));
+  const data = LIVE.hist.filter((_, i) => i % stepN === 0);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(f * xMax));
+  logChart($("#live-loss"), [{ name: "live", data, step: stepN, color: rgb(C.led), width: 2 }], { xMax, yMin: 1e-4, yMax: 1, refY: 0.01, xTicks: ticks });
+  LIVE.graph.update(LIVE.net, forward(LIVE.net, S.x), { mode: "gewicht" });
+}
+function liveLoop() {
+  if (!LIVE.running) return;
+  const n = liveSpeed();
+  for (let i = 0; i < n; i++) liveEpoch();
+  liveRender();
+  if (LIVE.epoch >= 50000) { liveToggle(false); return; }
+  LIVE.raf = requestAnimationFrame(liveLoop);
+}
+function liveToggle(on) {
+  LIVE.running = on;
+  $("#live-run").textContent = on ? "Anhalten" : "Training fortsetzen";
+  if (on) LIVE.raf = requestAnimationFrame(liveLoop); else cancelAnimationFrame(LIVE.raf);
+}
+function buildLive() {
+  const wrap = $("#live-digits");
+  for (let d = 0; d < 10; d++) { const svg = svgEl("svg", {}); wrap.append(svg); LIVE.displays.push(sevenSeg(svg)); }
+  $("#live-run").addEventListener("click", () => liveToggle(!LIVE.running));
+  $("#live-step").addEventListener("click", () => { liveEpoch(); liveRender(); });
+  $("#live-reset").addEventListener("click", () => { liveToggle(false); $("#live-run").textContent = "Training starten"; liveReset(true); });
+  ["#live-hidden", "#live-init"].forEach(id => $(id).addEventListener("change", () => { liveToggle(false); $("#live-run").textContent = "Training starten"; liveReset(false); }));
+  $("#live-lr").addEventListener("input", () => { $("#live-lr-out").textContent = liveLr().toFixed(liveLr() < 0.1 ? 3 : 2); });
+  $("#live-speed").addEventListener("input", () => { $("#live-speed-out").textContent = liveSpeed(); });
+  $("#live-lr-out").textContent = liveLr().toFixed(2);
+  $("#live-speed-out").textContent = liveSpeed();
+  liveReset(false);
+}
+
+/* ---------- XOR ---------- */
+const XS = { p: [0, 1] };
+const xorGraph = makeGraph($("#xor-graph"), XNET.sizes, { inLabels: ["x₀", "x₁"], outLabels: ["ŷ"], height: 220, padX: 60 });
+/** Fläche einfärben: f(x0, x1) -> Wert 0..1. Punkt (0,0) unten links wie im Koordinatensystem. */
+function paintPlane(canvas, f) {
+  const ctx = canvas.getContext("2d"), n = canvas.width, img = ctx.createImageData(n, n);
+  for (let py = 0; py < n; py++) for (let px = 0; px < n; px++) {
+    const x0 = px / (n - 1), x1 = 1 - py / (n - 1), v = f(x0, x1);
+    // Entscheidungsgrenze v = 0,5 als dunkle Linie
+    const edge = Math.abs(v - 0.5) < 0.012;
+    const c = edge ? C.ink : mix(C.sunk, C.led, v);
+    const o = (py * n + px) * 4; img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+/** Gerade w0·x0 + w1·x1 + b = 0 (dort ist z = 0, also a = 0,5) im Einheitsquadrat. */
+function lineFor(w, b) {
+  const pts = [];
+  const add = (x0, x1) => { if (x0 >= -1e-9 && x0 <= 1 + 1e-9 && x1 >= -1e-9 && x1 <= 1 + 1e-9) pts.push([x0, x1]); };
+  if (Math.abs(w[1]) > 1e-12) { add(0, -b / w[1]); add(1, -(b + w[0]) / w[1]); }
+  if (Math.abs(w[0]) > 1e-12) { add(-b / w[0], 0); add(-(b + w[1]) / w[0], 1); }
+  return pts.length >= 2 ? [pts[0], pts[pts.length - 1]] : null;
+}
+function drawOverlay(svg, withHidden, point) {
+  svg.innerHTML = "";
+  const P = ([x0, x1]) => [x0, 1 - x1];
+  if (withHidden) XNET.layers[0].W.forEach((w, k) => {
+    const ln = lineFor(w, XNET.layers[0].b[k]); if (!ln) return;
+    const [a, b] = ln.map(P);
+    svgEl("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], stroke: rgb(C.ink), "stroke-width": 0.008, "stroke-dasharray": "0.025 0.018" }, svg);
+    const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const t = svgEl("text", { x: mid[0] + 0.02, y: mid[1] - 0.02, "font-size": 0.038, fill: rgb(C.ink), "font-family": "JetBrains Mono, monospace" }, svg); t.textContent = `h${k}`;
+  });
+  XORD.inputs.forEach((x, i) => {
+    const [cx, cy] = P(x);
+    svgEl("circle", { cx: Math.min(0.96, Math.max(0.04, cx)), cy: Math.min(0.96, Math.max(0.04, cy)), r: 0.032, fill: XORD.targets[i][0] ? rgb(C.led) : rgb(C.panel), stroke: rgb(C.ink), "stroke-width": 0.01 }, svg);
+  });
+  if (point) {
+    const [cx, cy] = P(point);
+    svgEl("circle", { cx, cy, r: 0.022, fill: "none", stroke: rgb(C.focus), "stroke-width": 0.012 }, svg);
+    svgEl("line", { x1: cx - 0.045, x2: cx + 0.045, y1: cy, y2: cy, stroke: rgb(C.focus), "stroke-width": 0.006 }, svg);
+    svgEl("line", { x1: cx, x2: cx, y1: cy - 0.045, y2: cy + 0.045, stroke: rgb(C.focus), "stroke-width": 0.006 }, svg);
+  }
+}
+function renderXorPlanes() {
+  paintPlane($("#xor-main canvas"), (a, b) => forward(XNET, [a, b]).A[2][0]);
+  [0, 1].forEach(k => {
+    paintPlane($(`#xor-h${k} canvas`), (a, b) => forward(XNET, [a, b]).A[1][k]);
+    const w = XNET.layers[0].W[k], b = XNET.layers[0].b[k];
+    $(`#xor-h${k}-cap`).textContent = `h${k} = σ(${fmt(w[0], 2)}·x₀ ${fmtS(w[1], 2)}·x₁ ${fmtS(b, 2)})`;
+  });
+  $("#xor-scale").style.background = `linear-gradient(90deg, ${rgb(C.sunk)}, ${rgb(C.led)})`;
+  const W2 = XNET.layers[1].W[0], b2 = XNET.layers[1].b[0];
+  $("#xor-sub").textContent = `ŷ = σ(${fmt(W2[0], 2)}·h0 ${fmtS(W2[1], 2)}·h1 ${fmtS(b2, 2)}). Punkte: gefüllt = Soll 1, hell = Soll 0.`;
+}
+function renderXor() {
+  const tr = forward(XNET, XS.p);
+  drawOverlay($("#xor-main svg"), true, XS.p);
+  [0, 1].forEach(k => drawOverlay($(`#xor-h${k} svg`), false, XS.p));
+  const isPt = XORD.inputs.findIndex(x => x[0] === XS.p[0] && x[1] === XS.p[1]);
+  const grad = isPt >= 0 ? backprop(XNET, XS.p, XORD.targets[isPt]) : null;
+  xorGraph.update(XNET, tr, { mode: "gewicht", grad });
+  const rows = XORD.inputs.map((x, i) => {
+    const t = forward(XNET, x), y = t.A[2][0], ok = (y > 0.5 ? 1 : 0) === XORD.targets[i][0];
+    return h("tr", { style: "cursor:pointer", onclick: () => { XS.p = x.slice(); renderXor(); } },
+      h("td", { class: "num" }, `[${x.join(", ")}]`), h("td", { class: "num r" }, fmt(t.A[1][0], 4)), h("td", { class: "num r" }, fmt(t.A[1][1], 4)),
+      h("td", { class: "num r" }, fmt(y, 5)), h("td", { class: "num r" }, String(XORD.targets[i][0])), h("td", { class: "r" }, h("span", { class: `pill ${ok ? "ok" : "bad"}` }, ok ? "richtig" : "falsch")));
+  });
+  $("#xor-table").replaceChildren(h("table", { class: "data" },
+    h("thead", {}, h("tr", {}, ...["Eingabe", "h0", "h1", "ŷ", "Soll", ""].map((t, i) => h("th", { class: i ? "r" : "" }, t)))), h("tbody", {}, ...rows)),
+    h("p", { class: "small muted", style: "margin-top:8px" }, `Aktuell: x = [${XS.p.map(v => fmt(v, 2)).join(", ")}] → ŷ = ${fmt(tr.A[2][0], 4)}. Zeile anklicken setzt den Punkt.`));
+}
+function buildXor() {
+  const plane = $("#xor-main");
+  const setFrom = e => {
+    const r = plane.getBoundingClientRect();
+    XS.p = [clamp01((e.clientX - r.left) / r.width), clamp01(1 - (e.clientY - r.top) / r.height)].map(v => Math.round(v * 100) / 100);
+    renderXor();
+  };
+  let drag = false;
+  plane.addEventListener("pointerdown", e => { drag = true; plane.setPointerCapture(e.pointerId); setFrom(e); });
+  plane.addEventListener("pointermove", e => { if (drag) setFrom(e); });
+  plane.addEventListener("pointerup", () => { drag = false; });
+}
+
+/* ---------- Experimente (Phase 8) ---------- */
+/** Achsenrahmen für ein Diagramm mit linearer y-Achse. Rückgabe: Skalierungsfunktionen. */
+function frame(svg, o) {
+  svg.innerHTML = "";
+  const vb = svg.viewBox.baseVal, W = vb.width, H = vb.height, m = { l: 44, r: 12, t: 12, b: 34 };
+  const X = v => m.l + (v - o.x0) / (o.x1 - o.x0) * (W - m.l - m.r);
+  const Y = v => m.t + (1 - (v - o.y0) / (o.y1 - o.y0)) * (H - m.t - m.b);
+  const g = svgEl("g", { class: "grid" }, svg);
+  o.yTicks.forEach(v => { svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) }, g); const t = svgEl("text", { x: m.l - 7, y: Y(v) + 3.5, "text-anchor": "end" }, svg); t.textContent = o.yFmt ? o.yFmt(v) : v; });
+  (o.xTicks || []).forEach(([v, lab]) => { const t = svgEl("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, svg); t.textContent = lab; });
+  if (o.xLabel) { const t = svgEl("text", { x: W - m.r, y: H - 4, "text-anchor": "end" }, svg); t.textContent = o.xLabel; }
+  svgEl("line", { x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b, class: "axis" }, svg);
+  return { X, Y, W, H, m };
+}
+function renderExperiments() {
+  const E = D.experimente || {};
+  // Platzhalter statt Diagramm; beim erneuten Zeichnen (Farbschema) ist er schon ersetzt
+  const fehlt = (sel, skript) => { const el = $(sel); if (el) el.replaceWith(h("p", { class: "empty-msg" }, `Noch nicht ausgeführt: python experimente/${skript}`)); };
+  const cKlein = rgb(C.led), cXavier = rgb(C.pos);
+
+  // Seed-Studie: Balken je Hidden-Größe, gefüllt = nach 20 000 Epochen, Rahmen = nach 80 000
+  if (E.seed_studie && $("#exp-seed")) {
+    const ex = E.seed_studie.ergebnisse, hid = [...new Set(ex.map(e => e.hidden))];
+    const f = frame($("#exp-seed"), { x0: 0, x1: hid.length, y0: 0, y1: 100, yTicks: [0, 25, 50, 75, 100], xTicks: hid.map((hh, i) => [i + 0.5, `2-${hh}-1`]) });
+    const bw = (f.X(1) - f.X(0)) * 0.34;
+    ex.forEach(e => {
+      const i = hid.indexOf(e.hidden), off = e.init === "klein" ? -bw - 2 : 2, x = f.X(i + 0.5) + off, col = e.init === "klein" ? cKlein : cXavier;
+      const tipT = `2-${e.hidden}-1, ${e.init}\nrichtig nach 20 000 Epochen: ${e.richtig_20k}/100\nsauber (alle < 0,1 vom Ziel): ${e.sauber_20k}/100\nrichtig nach 80 000: ${e.richtig_80k}/100\nhängt dauerhaft: ${e.haengt_fest}` +
+        (e.median_epoche_j001 ? `\nMedian bis J < 0,01: Epoche ${e.median_epoche_j001}` : "");
+      svgEl("rect", { x, y: f.Y(e.richtig_20k), width: bw, height: f.Y(0) - f.Y(e.richtig_20k), fill: col, opacity: 0.5, "data-tip": tipT }, $("#exp-seed"));
+      svgEl("rect", { x, y: f.Y(e.richtig_80k), width: bw, height: f.Y(0) - f.Y(e.richtig_80k), fill: "none", stroke: col, "stroke-width": 1.8, "pointer-events": "none" }, $("#exp-seed"));
+      const t = svgEl("text", { x: x + bw / 2, y: f.Y(e.richtig_80k) - 5, "text-anchor": "middle" }, $("#exp-seed")); t.textContent = e.richtig_20k;
+    });
+    $("#exp-seed-legend").replaceChildren(
+      h("span", {}, h("i", { style: `background:${cKlein}` }), "klein (σ = 0,1)"), h("span", {}, h("i", { style: `background:${cXavier}` }), "Xavier/Glorot"),
+      h("span", {}, "gefüllt: richtig nach 20 000 Epochen · Rahmen: nach 80 000"));
+    const k2 = ex.find(e => e.hidden === 2 && e.init === "klein"), x2 = ex.find(e => e.hidden === 2 && e.init === "xavier"), x3 = ex.find(e => e.hidden === 3 && e.init === "xavier");
+    if (k2 && x2 && x3) $("#exp-seed-note").textContent =
+      `Mit 2 Hidden-Neuronen hängen ${k2.haengt_fest} (klein) bzw. ${x2.haengt_fest} (Xavier) von 100 Läufen fest. ` +
+      `Ab 3 keiner mehr, und Xavier ist im Median nach ${x3.median_epoche_j001} statt ~16 000 Epochen fertig.`;
+  } else if ($("#exp-seed")) fehlt("#exp-seed", "seed_studie.py");
+
+  // Rauschen: Linien je Variante
+  if (E.rauschen && $("#exp-noise")) {
+    const k = E.rauschen.kurven, names = Object.keys(k), cols = [rgb(C.ink), rgb(C["ink-3"]), rgb(C.led), rgb(C.pos)];
+    const sMax = Math.max(...k[names[0]].map(p => p[0]));
+    const f = frame($("#exp-noise"), { x0: 0, x1: sMax, y0: 0, y1: 100, yTicks: [0, 25, 50, 75, 100], yFmt: v => v + " %", xTicks: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6].filter(v => v <= sMax + 1e-9).map(v => [v, String(v).replace(".", ",")]), xLabel: "σ" });
+    names.forEach((n, i) => {
+      const pts = k[n].map(p => `${f.X(p[0]).toFixed(1)},${f.Y(p[2] * 100).toFixed(1)}`).join(" ");
+      svgEl("polyline", { points: pts, fill: "none", stroke: cols[i], "stroke-width": i === 0 ? 2.6 : 1.8, "stroke-dasharray": i === 1 ? "4 3" : "" }, $("#exp-noise"));
+      k[n].forEach(p => svgEl("circle", { cx: f.X(p[0]), cy: f.Y(p[2] * 100), r: 2.6, fill: cols[i], "data-tip": `${n}\nσ = ${p[0]}\nZiffern richtig: ${(p[2] * 100).toFixed(1)} %\nSegmente richtig: ${(p[1] * 100).toFixed(1)} %` }, $("#exp-noise")));
+    });
+    $("#exp-noise-legend").replaceChildren(...names.map((n, i) => h("span", {}, h("i", { style: `background:${cols[i]}` }), n.replace("trainiert mit sigma", "10 Netze, trainiert mit σ"))));
+    const at = (n, s) => (k[n].find(p => Math.abs(p[0] - s) < 1e-9) || [0, 0, 0])[2] * 100;
+    const kipp = E.rauschen.gekippte_bits || [];
+    $("#exp-noise-note").textContent = `Bei σ = 0,2: Modell ${at(names[0], 0.2).toFixed(1).replace(".", ",")} %, mit Rauschen trainiert ${at(names[2], 0.2).toFixed(1).replace(".", ",")} %. ` +
+      (kipp.length ? `Gekippte Bits im Training: bei p = 0,2 nur ${(kipp[kipp.length - 1].ziffern * 100).toFixed(0)} %, weil jedes gekippte Bit eine andere gültige Zahl ergibt.` : "");
+  } else if ($("#exp-noise")) fehlt("#exp-noise", "rauschen.py");
+
+  // Aktivierungen: Tabelle
+  if (E.aktivierungen) {
+    const rows = E.aktivierungen.ergebnisse.map(e => h("tr", {},
+      h("td", {}, e.aufgabe), h("td", {}, e.aktivierung), h("td", {}, e.init),
+      h("td", { class: "r" }, h("span", { class: `pill ${e.richtig === e.laeufe ? "ok" : e.richtig >= e.laeufe * 0.7 ? "warn" : "bad"}` }, `${e.richtig}/${e.laeufe}`)),
+      h("td", { class: "num r" }, e.median_epoche_j001 == null ? "–" : Math.round(e.median_epoche_j001).toLocaleString("de-AT")),
+      h("td", { class: "num r" }, e.median_kosten_ende.toExponential(1))));
+    $("#exp-act").replaceChildren(h("table", { class: "data" },
+      h("thead", {}, h("tr", {}, ...["Netz", "Hidden", "Init", "richtig", "J < 0,01 ab", "J am Ende"].map((t, i) => h("th", { class: i > 2 ? "r" : "" }, t)))), h("tbody", {}, ...rows)),
+      h("p", { class: "small muted", style: "margin-top:10px" }, "tanh und ReLU lernen 7-Segment 4–6× schneller, scheitern aber meist bei XOR 2-2-1 (tote ReLU-Neuronen, keine Reserve)."));
+  } else fehlt("#exp-act", "aktivierungen.py");
+
+  // Vektorisiert: Tabelle
+  if (E.vektorisiert) {
+    $("#exp-vec").replaceChildren(h("table", { class: "data" },
+      h("thead", {}, h("tr", {}, ...["Netz", "Epochen", "Objekte", "Matrizen", "Faktor", "Abweichung"].map((t, i) => h("th", { class: i ? "r" : "" }, t)))),
+      h("tbody", {}, ...E.vektorisiert.map(v => h("tr", {}, h("td", {}, v.netz), h("td", { class: "num r" }, v.epochs.toLocaleString("de-AT")),
+        h("td", { class: "num r" }, `${v.objektorientiert_s.toFixed(1).replace(".", ",")} s`), h("td", { class: "num r" }, `${v.vektorisiert_s.toFixed(1).replace(".", ",")} s`),
+        h("td", { class: "num r" }, h("span", { class: `pill ${v.faktor >= 1 ? "ok" : "warn"}` }, `${v.faktor.toFixed(1).replace(".", ",")}×`)),
+        h("td", { class: "num r" }, fmtE(v.abweichung_vorhersage)))))),
+      h("p", { class: "small muted", style: "margin-top:10px" }, "Gleiche Ergebnisse. Matrizen lohnen sich erst bei breiten Schichten. Bei XOR kostet der numpy-Aufruf mehr als die Rechnung."));
+  } else fehlt("#exp-vec", "vektorisiert.py");
+}
+
+/* ---------- Zeichnen (Phase 9) ---------- */
+// Zweites Netz aus train_digits.py: 196 Pixel (14×14) -> 64 Hidden (Sigmoid) -> 10 Ziffern (Softmax),
+// trainiert auf MNIST. Die Zeichnung wird so aufbereitet, wie die MNIST-Bilder entstanden sind.
+const DIG = D.ziffern || null;
+const DNET = DIG ? netFromModel(DIG.modell) : null;
+const SEITE = DNET ? Math.round(Math.sqrt(DNET.sizes[0])) : 14;   // Kantenlänge der Netzeingabe (14)
+const DRAW = {
+  strokes: [],        // Striche, je eine Liste von Punkten [x, y] in 0..1 (relativ zum Zeichenfeld)
+  drawing: false,     // gerade Maus/Finger unten?
+  sample: null,       // statt einer Zeichnung: ein Testbild (SEITE² Werte 0..pixel_max) aus MNIST
+  sampleDigit: null,  // richtige Ziffer des Testbilds
+  raf: 0, feats: [], bars: [],
+};
+
+/**
+ * Zeichnung -> SEITE² Eingangswerte 0..1, nachgebaut wie MNIST aufbereitet ist:
+ *   1. Größe: Die längere Seite der Ziffer wird auf 20 Pixel skaliert (Seitenverhältnis bleibt) --
+ *      wie groß man malt, spielt also keine Rolle.
+ *   2. Strich: feste Breite STRICH, gerendert auf 28×28. Bei MNIST ist die Strichstärke gleich und
+ *      die Tintenmenge hängt von der Ziffer ab (gemessen: eine 1 hat 60, eine 0 hat 136 Pixel Tinte).
+ *   3. Lage: Die Ziffer wird so verschoben, dass ihr Schwerpunkt in der Mitte liegt (Pixel 14, 14).
+ *   4. Je 2×2 Pixel mitteln -> 14×14, wie verkleinere() in train_digits.py.
+ * Rückgabe: SEITE² Werte zeilenweise (Pixel [Zeile r][Spalte c] = Eintrag SEITE·r + c).
+ */
+const STRICH = 2.7;   // Strichbreite in 28er-Pixeln: MNIST-Tinte ÷ Weglänge typischer Ziffern (CLAUDE.md, E-36)
+const off28 = document.createElement("canvas");
+off28.width = off28.height = 28;
+const off28ctx = off28.getContext("2d", { willReadFrequently: true });
+/** Striche (schon in 28er-Koordinaten) auf das 28×28-Hilfsbild malen. Rückgabe: Deckung 0..1 je Pixel. */
+function render28(lines) {
+  const c = off28ctx;
+  c.clearRect(0, 0, 28, 28);
+  c.lineCap = c.lineJoin = "round";
+  c.lineWidth = STRICH;
+  c.strokeStyle = c.fillStyle = "#000";
+  for (const m of lines) {
+    c.beginPath();
+    if (m.length === 1) { c.arc(m[0][0], m[0][1], STRICH / 2, 0, 2 * Math.PI); c.fill(); continue; }
+    c.moveTo(m[0][0], m[0][1]);
+    for (let i = 1; i < m.length; i++) c.lineTo(m[i][0], m[i][1]);
+    c.stroke();
+  }
+  const rgba = c.getImageData(0, 0, 28, 28).data, a = new Float64Array(28 * 28);
+  for (let i = 0; i < a.length; i++) a[i] = rgba[i * 4 + 3] / 255;   // Alpha = wie stark das Pixel bedeckt ist
+  return a;
+}
+function drawingToPixels(strokes) {
+  const n = SEITE * SEITE;
+  const pts = strokes.flat();
+  if (!pts.length) return new Array(n).fill(0);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const s = 20 / Math.max(x1 - x0, y1 - y0, 1e-3);                       // 1. längere Seite -> 20 px
+  const place = (dx, dy) => strokes.map(st => st.map(p => [14 + dx + (p[0] - (x0 + x1) / 2) * s, 14 + dy + (p[1] - (y0 + y1) / 2) * s]));
+  let a = render28(place(0, 0));                                          // 2. erst nach der Box zentriert
+  let m = 0, sx = 0, sy = 0;                                              // 3. Schwerpunkt (Pixelindex)
+  for (let py = 0; py < 28; py++) for (let px = 0; px < 28; px++) { const v = a[py * 28 + px]; m += v; sx += v * px; sy += v * py; }
+  if (m > 0) a = render28(place(14 - sx / m, 14 - sy / m));
+  const k = 28 / SEITE, x = new Array(n).fill(0);                         // 4. k×k Pixel mitteln
+  for (let py = 0; py < 28; py++) for (let px = 0; px < 28; px++) x[Math.floor(py / k) * SEITE + Math.floor(px / k)] += a[py * 28 + px] / (k * k);
+  return x;
+}
+
+/** Zeichenfeld malen: Striche als leuchtende LED-Linie, ein Testbild als große Pixel. */
+function renderPad() {
+  const cv = $("#draw-pad"), c = cv.getContext("2d"), W = cv.width;
+  c.fillStyle = rgb(C.display);
+  c.fillRect(0, 0, W, W);
+  if (DRAW.sample) {
+    const cell = W / SEITE;
+    DRAW.sample.forEach((v, i) => {
+      if (!v) return;
+      c.fillStyle = `rgba(${C.led.join(",")},${v / DIG.pixel_max})`;
+      c.fillRect((i % SEITE) * cell, Math.floor(i / SEITE) * cell, cell + 0.5, cell + 0.5);
+    });
+    return;
+  }
+  c.lineCap = c.lineJoin = "round";
+  c.lineWidth = W * 0.06;
+  c.strokeStyle = c.fillStyle = rgb(C.led);
+  c.shadowColor = rgb(C.led);
+  c.shadowBlur = W * 0.03;
+  for (const st of DRAW.strokes) {
+    c.beginPath();
+    if (st.length === 1) { c.arc(st[0][0] * W, st[0][1] * W, c.lineWidth / 2, 0, 2 * Math.PI); c.fill(); continue; }
+    c.moveTo(st[0][0] * W, st[0][1] * W);
+    for (let i = 1; i < st.length; i++) c.lineTo(st[i][0] * W, st[i][1] * W);
+    c.stroke();
+  }
+  c.shadowBlur = 0;
+}
+
+/** Die Eingangsgewichte jedes Hidden-Neurons als SEITE×SEITE-Bild (Teal +, Magenta −). Hängt vom Farbschema ab. */
+function paintFeats() {
+  if (!DNET) return;
+  DRAW.feats.forEach((cv, j) => {
+    const w = DNET.layers[0].W[j], max = Math.max(...w.map(Math.abs), 1e-12);
+    const c = cv.getContext("2d"), img = c.createImageData(SEITE, SEITE);
+    w.forEach((v, i) => {
+      const col = mix(C.panel, v >= 0 ? C.pos : C.neg, Math.pow(clamp01(Math.abs(v) / max), 0.8));
+      img.data.set([col[0], col[1], col[2], 255], i * 4);
+    });
+    c.putImageData(img, 0, 0);
+  });
+}
+
+/** Alles im Kapitel neu berechnen: Pixel -> Forward-Pass -> Hidden-Bilder, Ziffer, Balken. */
+function renderDraw() {
+  DRAW.raf = 0;
+  if (!DNET) return;
+  renderPad();
+  const x = DRAW.sample ? DRAW.sample.map(v => v / DIG.pixel_max) : drawingToPixels(DRAW.strokes);
+
+  const ic = $("#draw-input").getContext("2d"), img = ic.createImageData(SEITE, SEITE);
+  x.forEach((v, i) => { const col = mix(C.panel, C.ink, clamp01(v)); img.data.set([col[0], col[1], col[2], 255], i * 4); });
+  ic.putImageData(img, 0, 0);
+
+  const leer = x.every(v => v === 0);
+  const tr = forward(DNET, x), a1 = tr.A[1], p = tr.A[2];
+  const win = p.indexOf(Math.max(...p));
+  // Beitrag von Hidden-Neuron j zur erkannten Ziffer = sein Summand w[win][j]·a_j in z_win
+  const beitrag = a1.map((a, j) => DNET.layers[1].W[win][j] * a);
+  const top = leer ? [] : beitrag.map((b, j) => [b, j]).sort((u, v) => v[0] - u[0]).slice(0, 3).map(t => t[1]);
+  DRAW.feats.forEach((cv, j) => {
+    cv.style.opacity = leer ? "1" : (0.15 + 0.85 * a1[j]).toFixed(3);
+    cv.classList.toggle("top", top.includes(j));
+    cv.setAttribute("data-tip", `h${j}: a = ${fmt(a1[j], 3)}` + (leer ? "" : `\nBeitrag zur ${win}: ${fmtS(beitrag[j], 2)}`));
+  });
+
+  const g = $("#draw-guess");
+  g.textContent = leer ? "?" : String(win);
+  g.classList.toggle("leer", leer);
+  $("#draw-prob").textContent = leer ? "zeichne eine Ziffer"
+    : `zu ${(p[win] * 100).toFixed(1).replace(".", ",")} %` + (DRAW.sample ? ` · richtig wäre ${DRAW.sampleDigit}` : "");
+  DRAW.bars.forEach(({ row, fill, val }, k) => {
+    const v = leer ? 0 : p[k];
+    fill.style.width = (v * 100).toFixed(1) + "%";
+    val.textContent = leer ? "–" : (v * 100).toFixed(1).replace(".", ",") + " %";
+    row.classList.toggle("win", !leer && k === win);
+  });
+}
+/** Neu zeichnen höchstens einmal pro Bildschirmbild (Mausbewegungen kommen öfter). */
+function scheduleDraw() { if (!DRAW.raf) DRAW.raf = requestAnimationFrame(renderDraw); }
+
+function buildDraw() {
+  if (!DNET) {
+    $("#zeichnen .draw-bench").replaceWith(h("p", { class: "empty-msg" }, "Noch nicht trainiert: py -3.14 train_digits.py, danach den Export wiederholen."));
+    return;
+  }
+  $("#draw-acc").textContent = `${(DIG.test_genauigkeit * 100).toFixed(1).replace(".", ",")} % richtig auf ${DIG.test_anzahl.toLocaleString("de-AT")} Testbildern`;
+  $("#draw-input").width = $("#draw-input").height = SEITE;
+  $("#draw-input-sub").textContent = `${SEITE} × ${SEITE} Pixel`;
+  $("#draw-feats-title").textContent = `${DNET.sizes[1]} Hidden-Neuronen`;
+  const grid = $("#draw-feats");
+  DRAW.feats = DNET.layers[0].W.map(() => { const cv = h("canvas", { width: SEITE, height: SEITE }); grid.append(cv); return cv; });
+  DRAW.bars = Array.from({ length: 10 }, (_, k) => {
+    const fill = h("div", { class: "bar-fill" }), val = h("span", { class: "v" });
+    const row = h("div", { class: "bar-row" }, h("span", {}, String(k)), h("div", { class: "bar-track" }, fill), val);
+    $("#draw-bars").append(row);
+    return { row, fill, val };
+  });
+
+  const pad = $("#draw-pad");
+  const pos = e => { const r = pad.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height]; };
+  pad.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    pad.setPointerCapture(e.pointerId);
+    if (DRAW.sample) { DRAW.sample = null; DRAW.strokes = []; }   // auf ein Testbild malen = neu anfangen
+    DRAW.drawing = true;
+    DRAW.strokes.push([pos(e)]);
+    scheduleDraw();
+  });
+  pad.addEventListener("pointermove", e => {
+    if (!DRAW.drawing) return;
+    const p = pos(e), st = DRAW.strokes[DRAW.strokes.length - 1], q = st[st.length - 1];
+    if (Math.hypot(p[0] - q[0], p[1] - q[1]) > 0.004) { st.push(p); scheduleDraw(); }
+  });
+  const stop = () => { DRAW.drawing = false; };
+  pad.addEventListener("pointerup", stop);
+  pad.addEventListener("pointercancel", stop);
+
+  $("#draw-clear").addEventListener("click", () => { DRAW.strokes = []; DRAW.sample = null; scheduleDraw(); });
+  $("#draw-undo").addEventListener("click", () => { if (DRAW.sample) DRAW.sample = null; else DRAW.strokes.pop(); scheduleDraw(); });
+  $("#draw-sample").addEventListener("click", () => {
+    const i = Math.floor(Math.random() * DIG.test_bilder.length);
+    DRAW.sample = DIG.test_bilder[i];
+    DRAW.sampleDigit = DIG.test_ziffern[i];
+    DRAW.strokes = [];
+    scheduleDraw();
+  });
+}
+
+/* ---------- Nachweis ---------- */
+function renderProof() {
+  const ref = SEVEN.referenz_python;
+  const js16 = ref.inputs.map(x => forward(NET, x).A[2]);
+  const maxDiff = (A, B) => Math.max(...A.flatMap((row, i) => row.map((v, j) => Math.abs(v - B[i][j]))));
+  const rows = [];
+  rows.push(["Browser (JavaScript)", "Python, 7seg.json", "alle 16 Eingaben × 7", maxDiff(js16, ref.outputs)]);
+  const ref10 = ref.outputs.slice(0, 10);
+  if (D.c && D.c.txt) rows.push(["C, Part 4 (aus 7seg.txt)", "Python, 7seg.json", "Ziffern 0–9 × 7", maxDiff(D.c.txt, ref10)]);
+  else rows.push(["C, Part 4 (aus 7seg.txt)", "–", "nicht gebaut", null]);
+  if (D.c && D.c.header) rows.push(["C, Part 5 (aus 7seg_net.h)", "Python, 7seg.json", "Ziffern 0–9 × 7", maxDiff(D.c.header, ref10)]);
+  else rows.push(["C, Part 5 (aus 7seg_net.h)", "–", "nicht gebaut", null]);
+  if (D.c && D.c.txt) rows.push(["Browser (JavaScript)", "C, Part 4", "Ziffern 0–9 × 7", maxDiff(js16.slice(0, 10), D.c.txt)]);
+  if (D.tf) {
+    const v = D.tf.vergleiche.find(v => v.layer_sizes.join() === NET.sizes.join());
+    if (v) rows.push(["TensorFlow identisch (nach eigenem Training)", "eigene Implementierung", "Ziffern 0–9 × 7", v.abweichung_eigen_tf_identisch]);
+  }
+  const xr = XORD.referenz_python;
+  rows.push(["Browser (JavaScript), XOR", "Python, xor.json", "4 Eingaben", maxDiff(xr.inputs.map(x => forward(XNET, x).A[2]), xr.outputs)]);
+  if (DNET) {
+    const dr = DIG.referenz_python;
+    rows.push(["Browser (JavaScript), Ziffern", "Python, digits.json", `${dr.inputs.length} Testbilder × 10`, maxDiff(dr.inputs.map(x => forward(DNET, x).A[2]), dr.outputs)]);
+  }
+  // Gewichte selbst: Browser liest dieselbe JSON wie Python -> bitgleich per Konstruktion
+  $("#proof-table").replaceChildren(h("table", { class: "data" },
+    h("thead", {}, h("tr", {}, ...["Implementierung", "verglichen mit", "Umfang", "max. Abweichung", "Grenze 10⁻⁹"].map((t, i) => h("th", { class: i > 2 ? "r" : "" }, t)))),
+    h("tbody", {}, ...rows.map(([a, b, n, d]) => h("tr", {},
+      h("td", {}, a), h("td", {}, b), h("td", { class: "muted" }, n),
+      h("td", { class: "num r" }, d == null ? "–" : d === 0 ? "0 (bit-identisch)" : fmtE(d)),
+      h("td", { class: "r" }, d == null ? h("span", { class: "pill neutral" }, "fehlt") : h("span", { class: `pill ${d <= 1e-9 ? "ok" : "bad"}` }, d <= 1e-9 ? "erfüllt" : "verletzt")))))));
+}
+
+/* =========================================================================================
+   4. Zusammenspiel
+   ========================================================================================= */
+
+/** Alles neu zeichnen, was von der Eingabe oder Auswahl abhängt. */
+function update() {
+  const tr = forward(NET, S.x);
+  renderBench(tr);
+  renderStep(tr);
+  renderInspector(tr);
+  renderMatrices();
+  renderAllDigits();
+  renderBackprop();
+}
+/** Alles neu zeichnen (z.B. nach Wechsel des Farbschemas). */
+function renderAll() {
+  readColors();
+  update();
+  renderTraining();
+  renderXorPlanes();
+  renderXor();
+  renderExperiments();
+  renderProof();
+  paintFeats();
+  renderDraw();
+  if (LIVE.net) liveRender();
+}
+
+/* Farbschema: System / Hell / Dunkel. Die Wahl wird nur lokal gemerkt. */
+function setupTheme() {
+  const btn = $("#theme-btn"), order = ["system", "light", "dark"], names = { system: "System", light: "Hell", dark: "Dunkel" };
+  let cur = "system";
+  try { cur = localStorage.getItem("nn-theme") || "system"; } catch (e) { /* Speicher gesperrt */ }
+  const apply = () => {
+    if (cur === "system") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", cur);
+    btn.textContent = `Schema: ${names[cur]}`;
+  };
+  apply();
+  btn.addEventListener("click", () => {
+    cur = order[(order.indexOf(cur) + 1) % 3];
+    try { localStorage.setItem("nn-theme", cur); } catch (e) { /* ignorieren */ }
+    // apply() ändert data-theme -> der MutationObserver unten zeichnet neu. Ausnahme: Wechsel
+    // zwischen "Dunkel" und "System" (bei dunklem System) ändert das Aussehen nicht.
+    apply();
+  });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+  // Falls die Umgebung (z.B. ein Viewer) data-theme von außen setzt
+  new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
+/* ---------- Navigation: fünf Bereiche (.group), immer genau EIN Kapitel sichtbar ----------
+   Die Adresse merkt sich das Kapitel (#neuron, #live, ...), so lassen sich Kapitel direkt verlinken.
+   Alle Kapitel werden beim Start einmal gezeichnet, auch die versteckten: Diagramme sind SVG mit
+   viewBox bzw. Canvas mit fester Pixelzahl und brauchen dafür keine sichtbare Größe. */
+const NAV = { last: {} };   // zuletzt geöffnetes Kapitel je Bereich (Tab-Klick kehrt dorthin zurück)
+function goTo(id, merken = true) {
+  const sec = document.getElementById(id);
+  if (!sec || !sec.classList.contains("chapter")) return;
+  const group = sec.closest(".group"), name = group.dataset.group;
+  document.querySelectorAll(".group").forEach(g => { g.hidden = g !== group; });
+  group.querySelectorAll("section.chapter").forEach(s => { s.hidden = s !== sec; });
+  NAV.last[name] = id;
+  const markiere = (b, an) => (an ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
+  document.querySelectorAll("#tabs button").forEach(b => markiere(b, b.dataset.group === name));
+  group.querySelectorAll(".subtabs button").forEach(b => markiere(b, b.dataset.sec === id));
+  // Live-Training nicht unsichtbar weiterrechnen lassen (kostet sonst dauernd Rechenzeit)
+  if (id !== "live" && LIVE.running) liveToggle(false);
+  if (merken) history.replaceState(null, "", "#" + id);
+  scrollTo({ top: 0, behavior: "instant" });
+}
+function setupNav() {
+  document.querySelectorAll("#tabs button").forEach(b => b.addEventListener("click", () => {
+    const g = $(`.group[data-group="${b.dataset.group}"]`);
+    goTo(NAV.last[b.dataset.group] || g.querySelector("section.chapter").id);
+  }));
+  document.querySelectorAll(".subtabs button").forEach(b => b.addEventListener("click", () => goTo(b.dataset.sec)));
+  $(".brand").addEventListener("click", e => { e.preventDefault(); goTo("decoder"); });
+  addEventListener("hashchange", () => goTo(location.hash.slice(1), false));
+  // Start: Kapitel aus der Adresse, sonst der Decoder (#ziffer-7 öffnet den Decoder mit der 7)
+  const start = location.hash.slice(1);
+  const sec = document.getElementById(start);
+  goTo(sec && sec.classList.contains("chapter") ? start : "decoder", false);
+  // Der Browser springt beim Laden selbst zum Kapitel mit dieser id (Anker) und würde die
+  // Kapitel-Leiste unter der Kopfzeile verstecken -- danach wieder ganz nach oben.
+  history.scrollRestoration = "manual";
+  addEventListener("load", () => scrollTo({ top: 0, behavior: "instant" }));
+}
+
+readColors();
+// Start: Ziffer aus dem Link (#ziffer-7) oder 0; gewählt ist das stärkste Hidden-Neuron
+{
+  const m = location.hash.match(/^#ziffer-(\d+)$/);
+  const d0 = m ? Math.min(15, Number(m[1])) : 0;
+  S.x = bitsOf(d0);
+  const a1 = forward(NET, S.x).A[1];
+  S.sel = { layer: 0, k: a1.indexOf(Math.max(...a1)) };
+}
+renderFacts();
+buildInputs();
+buildDraw();
+buildSteps();
+buildInspector();
+buildStrip();
+buildLive();
+buildXor();
+setupTheme();
+setupNav();
+renderAll();
+</script>
+</body>
+</html>
